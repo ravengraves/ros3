@@ -228,7 +228,7 @@ rose_node *rose_create_node(char* in_name, i64 name_len,
 	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 
-	ROSE_GLOBAL_NODE = n;
+	ROSE_STATIC_NODE = n;
 
 	return n;
 }
@@ -247,7 +247,7 @@ rose_publisher *rose_create_pub(rose_node *n,
 		snprintf(topic, sizeof(topic), "%s%.*s",
 	n->prefix, (int)nlen, name);
 
-	rose_publisher pub = n->pubs[pubs_length];
+	rose_publisher *pub = n->pubs + pubs_length;
 	pub->node = n;
 
 	int64_t ret = quicksand_connect(&pub->pub,
@@ -279,19 +279,16 @@ rose_subscriber *rose_create_sub(rose_node *n,
 		snprintf(topic, sizeof(topic), "%s%.*s",
 	n->prefix, (int)nlen, name);
 
-	rose_publisher sub = n->subs[subs_length];
+	rose_publisher *sub = n->subs + subs_length;
 	sub->node = n;
 	sub->callback = callback;
 
-	int64_t rc = quicksand_connect(&sub->sub,
-	topic, -1,
-	-1, -1,
-	n->allocator);
-	if (rc != 0) {
+	int64_t ret = quicksand_connect(&sub->sub, topic, -1, -1, -1, n->allocator);
+	if (ret != 0) {
 		return NULL;
 	}
 
-	add_subscriber(sub);
+	subs_length += 1;
 	return sub;
 }
 
@@ -333,31 +330,31 @@ i64 rose_readlast(rose_subscriber *s, rosemsg *msg)
 }
 
 
-void rose_spin_once(void)
+void rose_spin_once(rose_node *n)
 {
-	for (size_t i = 0; i < g_sub_cnt; ++i) {
-		rose_subscriber *sub = g_subs[i];
+	static mirage_msg *m = mirage_create(1920*1080*3, n->allocator);
+	if (!m) 
+		m = mirage_create(1920*1080*3, n->allocator);
+	if (!m)
+		return;
+    	return; /* allocation failure */
+	for (size_t i = 0; i < node->subs_length; ++i) {
+		rose_subscriber *sub = node->subs[i];
 		if (!sub->callback)
 			continue;
-
-		/* Allocate a temporary buffer sized to the underlying slot. */
-		uint64_t slot_sz = sub->sub->buffer->message_size;
-		uint8_t *buf = rose_alloc(sub->node, (size_t)slot_sz);
-		int64_t sz = (int64_t)slot_sz;
-
-		int64_t rc = quicksand_read_latest(sub->sub, buf, &sz);
-		if (rc >= 0) {
+		m->length = m->max_length;
+		int64_t ret = quicksand_read_latest(sub->sub, m->data, &m->length);
+		if (ret >= 0) {
 			/* The user-provided callback receives the raw payload. */
-			sub->callback(buf);
+			sub->callback(m);
 		}
-		rose_dealloc(sub->node, (void **)&buf);
 	}
 }
 
-void rose_spin_forever(void)
+void rose_spin_forever(rose_node *node)
 {
 	while (1) {
-		rose_spin_once();
+		rose_spin_once(node);
 		rose_sleep(1e-6);
 	}
 }
@@ -390,8 +387,8 @@ void rose_log(rose_node *node,
         case 2: prefix = "[ROSE ERROR] "; break;
         case 3: prefix = "[ROSE FATAL] "; break;
         default:
-            prefix = "[ROSE INFO] ";
-            level  = 0;                     /* treat unknown as INFO */
+            prefix = "[ROSE ERROR] ";
+            level  = 2;                     /* treat unknown as ERROR */
             break;
     }
 

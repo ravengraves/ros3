@@ -85,8 +85,7 @@ void rose_spin_forever(void);
 i64 rose_get_param(rose_node *n, char* param_name, i64 param_name_length,
 	mirage_msg *param);
 
-i64 rose_set_param(rose_node *n, char* param_name, i64 param_name_length, 
-	mirage_msg *param);
+i64 rose_set_param(rose_node *n, mirage_msg *param);
 
 /// ---------------- Parameters ------------------------------------------------
 
