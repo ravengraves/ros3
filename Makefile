@@ -1,6 +1,5 @@
 CC := clang
 AR := llvm-ar
-TARGET := normal
 PREFIX ?= /usr/local
 
 CFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC -flto \
@@ -11,11 +10,7 @@ CEXE := -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
 LDFLAGS := -fuse-ld=lld
 
 # arduino version: TARGET=embedded
-ifeq ($(TARGET),embedded)
-SOURCE := mirage+embedded.c
-else
-SOURCE := mirage.c
-endif
+SOURCE := ros3.c
 
 ifeq ($(ARCH),x86_64)
 	CFLAGS += -march=native
@@ -25,43 +20,43 @@ ifeq ($(ARCH),aarch64)
 	CFLAGS += -march=armv8-a
 endif
 
-all: build/libmirage.so build/libmirage.a
+all: build/libros3.so build/libros3.a
 
-build/libmirage.so: build/mirage.o
-	$(CC) -shared -o build/libmirage.so build/mirage.o $(LDFLAGS)
+build/libros3.so: build/ros3.o
+	$(CC) -shared -o build/libros3.so build/ros3.o $(LDFLAGS)
 
-build/libmirage.a: build/mirage.o
-	$(AR) rcs build/libmirage.a build/mirage.o
+build/libros3.a: build/ros3.o
+	$(AR) rcs build/libros3.a build/ros3.o
 
-build/mirage.o: $(SOURCE)
+build/ros3.o: $(SOURCE)
 	mkdir -p build
-	$(CC) -c $(CFLAGS) $(SOURCE) -o build/mirage.o
+	$(CC) -c $(CFLAGS) $(SOURCE) -o build/ros3.o
 
-build/test: test.c build/libmirage.a
-	$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libmirage.a # -fsanitize=address,undefined
+build/test: test.c build/libros3.a
+	$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libros3.a # -fsanitize=address,undefined
 
-build/test_all: test_all.c build/libmirage.a
-	$(CC) $(CFLAGS) $(CEXE) -o build/test_all test_all.c build/libmirage.a # -fsanitize=address,undefined
+build/test_all: test_all.c build/libros3.a
+	$(CC) $(CFLAGS) $(CEXE) -o build/test_all test_all.c build/libros3.a # -fsanitize=address,undefined
 
 compile_commands.json: Makefile
 	@echo '[\n' \
-	'{"directory":"$(PWD)","command":"$(CC) -c $(CFLAGS) $(SOURCE) -o build/mirage.o","file":"$(SOURCE)"},\n' \
-	'{"directory":"$(PWD)","command":"$(CC) -shared -o build/libmirage.so build/mirage.o $(LDFLAGS)","file":"build/libmirage.so"},\n' \
-	'{"directory":"$(PWD)","command":"$(AR) rcs build/libmirage.a build/mirage.o","file":"build/libmirage.a"},\n' \
-	'{"directory":"$(PWD)","command":"$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libmirage.a -fuse-ld=lld -Wl,-gc-sections,-icf=safe","file":"test.c"}\n]' \
+	'{"directory":"$(PWD)","command":"$(CC) -c $(CFLAGS) $(SOURCE) -o build/ros3.o","file":"$(SOURCE)"},\n' \
+	'{"directory":"$(PWD)","command":"$(CC) -shared -o build/libros3.so build/ros3.o $(LDFLAGS)","file":"build/libros3.so"},\n' \
+	'{"directory":"$(PWD)","command":"$(AR) rcs build/libros3.a build/ros3.o","file":"build/libros3.a"},\n' \
+	'{"directory":"$(PWD)","command":"$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libros3.a -fuse-ld=lld -Wl,-gc-sections,-icf=safe","file":"test.c"}\n]' \
 	> $@
 
 install:
 	mkdir -p $(PREFIX)/lib
 	mkdir -p $(PREFIX)/include
-	install -m 0644 build/libmirage.so $(PREFIX)/lib/
-	install -m 0644 build/libmirage.a $(PREFIX)/lib/
+	install -m 0644 build/libros3.so $(PREFIX)/lib/
+	install -m 0644 build/libros3.a $(PREFIX)/lib/
 	install -m 0644 mirage.h $(PREFIX)/include/
 	sudo ldconfig
 
 uninstall:
-	rm $(PREFIX)/lib/libmirage.so
-	rm $(PREFIX)/lib/libmirage.a
+	rm $(PREFIX)/lib/libros3.so
+	rm $(PREFIX)/lib/libros3.a
 	rm $(PREFIX)/include/mirage.h
 	sudo ldconfig
 

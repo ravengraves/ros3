@@ -1,79 +1,81 @@
 #include "ros3.h"
 
-#include <stdlib.h>   /* malloc, free */
-#include <stdio.h>    /* snprintf */
-#include <string.h>   /* strlen, strcpy, memcpy */
-#include <unistd.h>   /* getpid */
-#include <sys/types.h>/* pid_t */
 #include <assert.h>
+#include <stdio.h>    /* snprintf */
+#include <stdlib.h>   /* malloc, free */
+#include <string.h>   /* strlen, strcpy, memcpy */
+#include <sys/types.h>/* pid_t */
+#include <unistd.h>   /* getpid */
 
 #define REMAP_SIZE 4096 // at most 4kb of remap strings
-#define REMAP_COUNT 64  // at most 64 remaps
-#define MAX_PUBSUB 256  // at most n pubsubs
+#define REMAP_COUNT 64	// at most 64 remaps
+#define MAX_PUBSUB 256	// at most n pubsubs
 
 static rose_node *ROSE_STATIC_NODE = NULL;
 
-static void* rose_alloc(rose_node *node, size_t size)
-{
-    if (node && node->allocator) return node->allocator(size);
-    return malloc(size);
+static void *rose_alloc(rose_node *node, size_t size) {
+	if(node && node->allocator) {
+		return node->allocator(size);
+	}
+	return malloc(size);
 }
 
-static void rose_dealloc(rose_node *node, void **ptr)
-{
-    if (!ptr || !(*ptr)) return;
-    if (node && node->deallocator) node->deallocator(ptr);
-    else free(ptr);
-    *ptr = 0;
+static void rose_dealloc(rose_node *node, void **ptr) {
+	if(!ptr || !(*ptr)) {
+		return;
+	}
+	if(node && node->deallocator) {
+		node->deallocator(ptr);
+	} else {
+		free(ptr);
+	}
+	*ptr = 0;
 }
 
-rose_node *rose_init(char argc, char **argv, char* name_in,
-		void *(*alloc)(size_t), void (*dealloc)(void *)) {
+rose_node *rose_init(char argc, char **argv, char *name_in,
+		     void *(*alloc)(size_t), void (*dealloc)(void *)) {
 	void *(*allocate)(size_t) = malloc;
 	if(alloc) {
-		allocate = (void *(*) (size_t)) alloc;
+		allocate = (void *(*) (size_t) ) alloc;
 	}
-	void (*deallocate)(void *) = free
+	void (*deallocate)(void *) = free;
 	if(dealloc) {
 		deallocate = (void (*)(void *)) dealloc;
 	}
 
-	char *remaps; = allocate(REMAP_SIZE);
-	i64 *remap_lens = allocate(REMAP_COUNT*2); // lengths
+	char *remaps;
+	= allocate(REMAP_SIZE);
+	i64 *remap_lens = allocate(REMAP_COUNT * 2); // lengths
 	u64 remap_count = 0;
 
 	char *remap_head = remaps; // pointer to front
 
 	char prefix[256] = "/rose/";
-	if (name_in[0] == "/"){
+	if(name_in[0] == "/") {
 		prefix[0] = "\0"; // provided global-namespaced name.
 	}
 	char name[256];
-	snprintf(name, strlen(name_in)+1, "%s", name_in)
-	
-	size_t remap_count = 0;
+	snprintf(name, strlen(name_in) + 1, "%s", name_in)
+
+			size_t remap_count = 0;
 
 	// remap args should be local:=global or __ns:=ns or __name:=name
 	// string parsing is so much fun
-	for (int i = 1; i < argc; ++i) {
+	for(int i = 1; i < argc; ++i) {
 		const char *arg = argv[i];
 		const size_t arglen = strlen(arg);
 		assert(arglen < 254 && "Error: Argument too long.");
 
 		char *remap = strstr(arg, ":=");
-		if (!remap) {
+		if(!remap) {
 			continue; // not a remap, no ":="
 		}
 		remap += 2; // start after ":="
-		assert(remap - arg < arglen && remap-2 != arg &&
-				"Error: Remap is empty.");
+		assert(remap - arg < arglen && remap - 2 != arg && "Error: Remap is empty.");
 
 		// input / global cannot contain ":" or "//"
-		assert(strnstr(arg, ":", remap-arg) == 0 && 
-			strnstr(remap, ":", (arg+arglen) - remap) == 0 && 
-			"Error: Invalid remap contains extra ':'");
-		assert(strstr(arg, "//") == 0 &&
-			"Error: Invalid remap contains '//'");
+		assert(strnstr(arg, ":", remap - arg) == 0 && strnstr(remap, ":", (arg + arglen) - remap) == 0 && "Error: Invalid remap contains extra ':'");
+		assert(strstr(arg, "//") == 0 && "Error: Invalid remap contains '//'");
 
 		// special __ns or __name remap
 		if(strncmp(arg, "__ns:=", strlen("__ns:=")) == 0) {
@@ -81,9 +83,10 @@ rose_node *rose_init(char argc, char **argv, char* name_in,
 				arglen -= 1;
 			}
 			int nslen = arglen - strlen("__ns:=") + 2 // '/' + null
-			if (remap[0] == "/") {  // global prefix, leading '/'
+					if(remap[0] == "/") {	  // global prefix, leading '/'
 				snprintf(prefix, nslen, "%s/", remap);
-			} else {  // default namespace prefix
+			}
+			else { // default namespace prefix
 				nslen += strlen("/rose/");
 				snprintf(prefix, nslen, "/rose/%s/", remap);
 			}
@@ -97,69 +100,68 @@ rose_node *rose_init(char argc, char **argv, char* name_in,
 			if(remap[0] == "/") { // stkip starting '/'
 				remap += 1;
 			}
-			snprintf(name, remap, arglen-(remap-arg) + 1, "%s", remap);
+			snprintf(name, remap, arglen - (remap - arg) + 1, "%s", remap);
 			continue;
 		}
 
 		// else this is a normal remap  local/name:=/global/name
-		int local_len = (remap-2)-arg;
+		int local_len = (remap - 2) - arg;
 		snprintf(remap_head, local_len + 1, "%s", arg);
 		remap_head += local_len + 1;
-		remap_lens[remap_count*2] = local_len;
-		
-		int global_len = arglen - (remap-arg);
+		remap_lens[remap_count * 2] = local_len;
+
+		int global_len = arglen - (remap - arg);
 		snprintf(remap_head, global_len + 1, "%s", remap);
 		remap_head += global_len + 1;
-		remap_lens[remap_count*2 + 1] = local_len;
+		remap_lens[remap_count * 2 + 1] = local_len;
 
 		remap_count += 1;
 	}
 
 	return rose_create_node(name,
-		(i64)strlen(name),
-		prefix,
-		(i64)strlen(prefix),
-		remap_buf,
-		(i64 *)remap_lens,
-		remap_cnt,
-		allocate,
-		deallocate);
+				(i64) strlen(name),
+				prefix,
+				(i64) strlen(prefix),
+				remap_buf,
+				(i64 *) remap_lens,
+				remap_cnt,
+				allocate,
+				deallocate);
 }
 
-rose_node *rose_create_node(char* in_name, i64 name_len,
-		char* in_prefix, i64 prefix_len,
-		char *remaps, i64* remap_string_lengths, u64 remap_count,
-		void *(*alloc)(size_t), void (*dealloc)(void *)) {
+rose_node *rose_create_node(char *in_name, i64 name_len,
+			    char *in_prefix, i64 prefix_len,
+			    char *remaps, i64 *remap_string_lengths, u64 remap_count,
+			    void *(*alloc)(size_t), void (*dealloc)(void *)) {
 	void *(*allocate)(size_t) = malloc;
 	if(alloc) {
-		allocate = (void *(*) (size_t)) alloc;
+		allocate = (void *(*) (size_t) ) alloc;
 	}
-	void (*deallocate)(void *) = free
-	if(dealloc) {
+	void (*deallocate)(void *) = free if(dealloc) {
 		deallocate = (void (*)(void *)) dealloc;
 	}
 
 	assert(in_name && "Error: name is null");
 	assert(name_len > 0 && "Error: name has invalid length");
-	assert((prefix_len > 0 || prefix_len == -1)  && "Error: prefix_len is invalid");
+	assert((prefix_len > 0 || prefix_len == -1) && "Error: prefix_len is invalid");
 
 	// default to prefix if in_prefix is nullptr.
 	char topic[512] = "/rose/";
-	if (!in_prefix) {
+	if(!in_prefix) {
 		in_prefix = topic;
 		prefix_len = 6;
 	}
-	if (prefix_len == -1) {
+	if(prefix_len == -1) {
 		prefix_len = strlen(in_prefix)
 	}
 	if(in_prefix[0] != "/") {
 		snprintf(topic + 6, prefix_len + 6 + 1, "%s", in_prefix);
 		in_prefix = topic;
-		prefix_len =  prefix_len + 6;
+		prefix_len = prefix_len + 6;
 	}
 
 	// default to strlen if provided len is -1.
-	if (name_len == -1) {
+	if(name_len == -1) {
 		name_len = strlen(in_name)
 	}
 	assert(name_len < 255 && "Prefix is too long");
@@ -169,8 +171,8 @@ rose_node *rose_create_node(char* in_name, i64 name_len,
 	n->deallocator = deallocate;
 
 	char *name = rose_alloc(n, name_len + 64);
-	memcpy(name, in_name, (size_t)name_len);
-	sprintf(name+name_length, "-%d", (int)getpid());
+	memcpy(name, in_name, (size_t) name_len);
+	sprintf(name + name_length, "-%d", (int) getpid());
 	n->name = name;
 	n->name_length = strlen(name);
 
@@ -185,7 +187,8 @@ rose_node *rose_create_node(char* in_name, i64 name_len,
 
 	n->pubs = allocate(sizeof(rose_publisher) * MAX_PUBSUB);
 	n->pubs_length = 0;
-	n->subs = allocate(sizeof(rose_subscriber) * MAX_PUBSUB);;
+	n->subs = allocate(sizeof(rose_subscriber) * MAX_PUBSUB);
+	;
 	n->pubs_length = 0;
 
 	// find where base prefix ends (default "/rose/")
@@ -201,12 +204,12 @@ rose_node *rose_create_node(char* in_name, i64 name_len,
 	sprintf(topic + base_prefix_len, "%s", "rosemaster");
 	res = quicksand_connect(&n->rosemaster_pub, topic, -1, 512, 8192, allocate);
 	assert(res == 0 && "Error: could not map rosemaster ring.")
-	n->rosemaster_pub.node = n;
+			n->rosemaster_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
 	res = quicksand_connect(&n->log_pub, topic, -1, 1024, 8192, allocate);
 	assert(res == 0 && "Error: could not map roselog ring.")
-	n->log_pub.node = n;
+			n->log_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "param_query");
 	res = quicksand_connect(&n->param_pub, topic, -1, 512, 8192, allocate);
@@ -219,13 +222,13 @@ rose_node *rose_create_node(char* in_name, i64 name_len,
 	sprintf(topic + base_prefix_len + name_len + 1, "%s", "params");
 	res = quicksand_connect(&n->param_sub, topic, -1, 1024, 1024, allocate);
 	assert(res == 0 && "Error: could not map node params ring.")
-	n->param_sub.node = n;
+			n->param_sub.node = n;
 	n->param_sub.callback = NULL;
 
 	sprintf(topic + base_prefix_len + name_len + 1, "%s", "control");
 	res = quicksand_connect(&n->param_pub, topic, -1, 1024, 1024, allocate);
 	assert(res == 0 && "Error: could not map node control ring.")
-	n->control_sub.node = n;
+			n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 
 	ROSE_STATIC_NODE = n;
@@ -234,28 +237,30 @@ rose_node *rose_create_node(char* in_name, i64 name_len,
 }
 
 rose_publisher *rose_create_pub(rose_node *n,
-	char *name, i64 name_length,
-	u64 message_length, u64 message_hz) {
+				char *name, i64 name_length,
+				u64 message_length, u64 message_hz) {
 	assert(n && "Error: node is NULL");
-	size_t nlen = (name_length == -1) ? strlen(name) : (size_t)name_length;
+	size_t nlen = (name_length == -1) ? strlen(name) : (size_t) name_length;
 
 	/* Build the fully-qualified topic name. */
 	char topic[512];
-	if (name[0] == '/')
-		snprintf(topic, sizeof(topic), "%.*s", (int)nlen, name);
-	else
-		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int)nlen, name);
-	if (n->pubs_length >= MAX_PUBSUB)
-        	return NULL;
+	if(name[0] == '/') {
+		snprintf(topic, sizeof(topic), "%.*s", (int) nlen, name);
+	} else {
+		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int) nlen, name);
+	}
+	if(n->pubs_length >= MAX_PUBSUB) {
+		return NULL;
+	}
 
 	rose_publisher *pub = n->pubs + pubs_length;
 	pub->node = n;
 
 	int64_t ret = quicksand_connect(&pub->pub, topic, -1,
-			(int64_t)message_length,
-			(int64_t)message_hz,
-			n->allocator);
-	if (ret != 0) {
+					(int64_t) message_length,
+					(int64_t) message_hz,
+					n->allocator);
+	if(ret != 0) {
 		return NULL;
 	}
 
@@ -264,29 +269,31 @@ rose_publisher *rose_create_pub(rose_node *n,
 }
 
 rose_subscriber *rose_create_sub(rose_node *n,
-	char *name, i64 name_length,
-	u64 latest_only,
-	void (*callback)(u8 *)) {
-	(void)latest_only;   /* not used in the minimal implementation */
+				 char *name, i64 name_length,
+				 u64 latest_only,
+				 void (*callback)(u8 *)) {
+	(void) latest_only; /* not used in the minimal implementation */
 
 	assert(n && "node is NULL");
-	size_t nlen = (name_length == -1) ? strlen(name) : (size_t)name_length;
+	size_t nlen = (name_length == -1) ? strlen(name) : (size_t) name_length;
 
 	char topic[512];
-	if (name[0] == '/')
-		snprintf(topic, sizeof(topic), "%.*s", (int)nlen, name);
-	else
-		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int)nlen, name);
+	if(name[0] == '/') {
+		snprintf(topic, sizeof(topic), "%.*s", (int) nlen, name);
+	} else {
+		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int) nlen, name);
+	}
 
-	if (n->subs_length >= MAX_PUBSUB)
-        	return NULL;
+	if(n->subs_length >= MAX_PUBSUB) {
+		return NULL;
+	}
 
 	rose_publisher *sub = n->subs + subs_length;
 	sub->node = n;
 	sub->callback = callback;
 
 	int64_t ret = quicksand_connect(&sub->sub, topic, -1, -1, -1, n->allocator);
-	if (ret != 0) {
+	if(ret != 0) {
 		return NULL;
 	}
 
@@ -295,69 +302,70 @@ rose_subscriber *rose_create_sub(rose_node *n,
 }
 
 
-i64 rose_publish(rose_publisher *p, mirage_msg *msg)
-{
-	if (!p || !msg)
+i64 rose_publish(rose_publisher *p, mirage_msg *msg) {
+	if(!p || !msg) {
 		return ROSE_ERR_BADINPUT;
+	}
 	return quicksand_write(p->pub, msg->data, msg->cursor);
 }
 
 
-i64 rose_read(rose_subscriber *s, rosemsg *msg)
-{
-	if (!s || !msg)
+i64 rose_read(rose_subscriber *s, rosemsg *msg) {
+	if(!s || !msg) {
 		return ROSE_ERR_BADINPUT;
+	}
 
 	int64_t sz = msg->max_length;
 	int64_t rc = quicksand_read(s->sub, msg->data, &sz);
-	if (rc >= 0) {
-		msg->length = (u64)sz;
-		return rc;                 /* number of msgs remaining */
+	if(rc >= 0) {
+		msg->length = (u64) sz;
+		return rc; /* number of msgs remaining */
 	}
-	return ROSE_NO_DATA;               /* nothing to read */
+	return ROSE_NO_DATA; /* nothing to read */
 }
 
-i64 rose_readlast(rose_subscriber *s, rosemsg *msg)
-{
-	if (!s || !msg)
+i64 rose_readlast(rose_subscriber *s, rosemsg *msg) {
+	if(!s || !msg) {
 		return ROSE_ERR_BADINPUT;
+	}
 
 	int64_t sz = msg->max_length;
 	int64_t rc = quicksand_read_latest(s->sub, msg->data, &sz);
-	if (rc >= 0) {
-		msg->length = (u64)sz;
+	if(rc >= 0) {
+		msg->length = (u64) sz;
 		return rc;
 	}
 	return ROSE_NO_DATA;
 }
 
 
-void rose_spin_once(rose_node *n)
-{
-	if (!node)
-        	return;
+void rose_spin_once(rose_node *n) {
+	if(!node) {
+		return;
+	}
 
 	static mirage_msg *m = NULL;
-	if (!m) {
-		m = mirage_create(1920*1080*3, n->allocator);
-		if (!m)
+	if(!m) {
+		m = mirage_create(1920 * 1080 * 3, n->allocator);
+		if(!m) {
 			return; // allocation failure
+		}
 	}
-	for (size_t i = 0; i < node->subs_length; ++i) {
+	for(size_t i = 0; i < node->subs_length; ++i) {
 		rose_subscriber *sub = node->subs[i];
-		if (!sub->callback)
+		if(!sub->callback) {
 			continue;
+		}
 		m->length = m->max_length;
 		int64_t ret = quicksand_read_latest(sub->sub, m->data, &m->length);
-		if (ret >= 0) {
-			sub->callback(m);  // run callback
+		if(ret >= 0) {
+			sub->callback(m); // run callback
 		}
 	}
 }
 
-void rose_spin_forever(rose_node *node)
-{
-	while (1) {
+void rose_spin_forever(rose_node *node) {
+	while(1) {
 		rose_spin_once(node);
 		rose_sleep(1e-3);
 	}
@@ -377,112 +385,114 @@ void rose_spin_forever(rose_node *node)
  *      others -> stderr
  * ------------------------------------------------------------------*/
 void rose_log(rose_node *node,
-              int level,
-              const char *fmt,
-              ...)
-{
-    /* ------------------------------------------------------------------
+	      int level,
+	      const char *fmt,
+	      ...) {
+	/* ------------------------------------------------------------------
      *  1.  Map the integer level to a string prefix.
      * ------------------------------------------------------------------*/
-    const char *prefix;
-    switch (level) {
-        case 0: prefix = "[ROSE INFO] ";  break;
-        case 1: prefix = "[ROSE WARN] ";  break;
-        case 2: prefix = "[ROSE ERROR] "; break;
-        case 3: prefix = "[ROSE FATAL] "; break;
-        default:
-            prefix = "[ROSE ERROR] ";
-            level  = 2;                     /* treat unknown as ERROR */
-            break;
-    }
+	const char *prefix;
+	switch(level) {
+	case 0: prefix = "[ROSE INFO] "; break;
+	case 1: prefix = "[ROSE WARN] "; break;
+	case 2: prefix = "[ROSE ERROR] "; break;
+	case 3: prefix = "[ROSE FATAL] "; break;
+	default:
+		prefix = "[ROSE ERROR] ";
+		level = 2; /* treat unknown as ERROR */
+		break;
+	}
 
-    /* ------------------------------------------------------------------
+	/* ------------------------------------------------------------------
      *  2.  Format the user message (max 1024 bytes).
      * ------------------------------------------------------------------*/
-    char user_msg[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    int user_len = vsnprintf(user_msg, sizeof(user_msg), fmt, ap);
-    va_end(ap);
-    if (user_len < 0) return;                 /* formatting error */
-    if ((size_t)user_len >= sizeof(user_msg))
-        user_len = (int)sizeof(user_msg) - 1;
-    user_msg[user_len] = '\0';
+	char user_msg[1024];
+	va_list ap;
+	va_start(ap, fmt);
+	int user_len = vsnprintf(user_msg, sizeof(user_msg), fmt, ap);
+	va_end(ap);
+	if(user_len < 0) {
+		return; /* formatting error */
+	}
+	if((size_t) user_len >= sizeof(user_msg)) {
+		user_len = (int) sizeof(user_msg) - 1;
+	}
+	user_msg[user_len] = '\0';
 
-    /* ------------------------------------------------------------------
+	/* ------------------------------------------------------------------
      *  3.  Compose the console string.
      * ------------------------------------------------------------------*/
-    char console_msg[1024];
-    int console_len = snprintf(console_msg, sizeof(console_msg),
-                               "%s%s", prefix, user_msg);
-    if (console_len < 0) return;
-    if ((size_t)console_len >= sizeof(console_msg))
-        console_len = (int)sizeof(console_msg) - 1;
-    console_msg[console_len] = '\0';
+	char console_msg[1024];
+	int console_len = snprintf(console_msg, sizeof(console_msg),
+				   "%s%s", prefix, user_msg);
+	if(console_len < 0) {
+		return;
+	}
+	if((size_t) console_len >= sizeof(console_msg)) {
+		console_len = (int) sizeof(console_msg) - 1;
+	}
+	console_msg[console_len] = '\0';
 
-    /* ------------------------------------------------------------------
+	/* ------------------------------------------------------------------
      *  4.  Print to stdout (INFO) or stderr (others).
      * ------------------------------------------------------------------*/
-    FILE *stream = (level == 0) ? stdout : stderr;
-    fputs(console_msg, stream);
-    fputc('\n', stream);
-    fflush(stream);
+	FILE *stream = (level == 0) ? stdout : stderr;
+	fputs(console_msg, stream);
+	fputc('\n', stream);
+	fflush(stream);
 
-    /* ------------------------------------------------------------------
+	/* ------------------------------------------------------------------
      *  5.  Build and publish a Mirage message.
      * ------------------------------------------------------------------*/
-    static mirage_msg *m = NULL;
-    if (!m) {
-        m = mirage_create(1024, 0);
-        if (!m)
-            return;
-    }
+	static mirage_msg *m = NULL;
+	if(!m) {
+		m = mirage_create(1024, 0);
+		if(!m) {
+			return;
+		}
+	}
 
-    int64_t err = 0;
-    err |= mirage_write_start(m);              /* message start marker */
-    err |= mirage_write_fn(m, "Log", (int64_t)strlen("Log"), 2);
-    err |= mirage_write_f64(m, (f64)level);   /* integer error level as f64 */
-    err |= mirage_write_string(m, user_msg,
-                               (int64_t)strlen(user_msg));
+	int64_t err = 0;
+	err |= mirage_write_start(m); /* message start marker */
+	err |= mirage_write_fn(m, "Log", (int64_t) strlen("Log"), 2);
+	err |= mirage_write_f64(m, (f64) level); /* integer error level as f64 */
+	err |= mirage_write_string(m, user_msg,
+				   (int64_t) strlen(user_msg));
 
-    if (err >= 0 && node && node->log_pub.pub) {
-        int64_t msg_len = m->cursor;
-        quicksand_write(node->log_pub.pub, m->data, msg_len);
-    }
+	if(err >= 0 && node && node->log_pub.pub) {
+		int64_t msg_len = m->cursor;
+		quicksand_write(node->log_pub.pub, m->data, msg_len);
+	}
 
-    mirage_destroy(&m, 0);
+	mirage_destroy(&m, 0);
 }
 
-void rose_info(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    rose_log_wrapper(ROSE_STATIC_NODE, 0, fmt, ap);
-    va_end(ap);
+void rose_info(const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	rose_log_wrapper(ROSE_STATIC_NODE, 0, fmt, ap);
+	va_end(ap);
 }
 
-void rose_warn(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    rose_log_wrapper(ROSE_STATIC_NODE, 1, fmt, ap);
-    va_end(ap);
+void rose_warn(const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	rose_log_wrapper(ROSE_STATIC_NODE, 1, fmt, ap);
+	va_end(ap);
 }
 
-void rose_error(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    rose_log_wrapper(ROSE_STATIC_NODE, 2, fmt, ap);
-    va_end(ap);
+void rose_error(const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	rose_log_wrapper(ROSE_STATIC_NODE, 2, fmt, ap);
+	va_end(ap);
 }
 
-void rose_fatal(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    rose_log_wrapper(ROSE_STATIC_NODE, 3, fmt, ap);
-    va_end(ap);
+void rose_fatal(const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	rose_log_wrapper(ROSE_STATIC_NODE, 3, fmt, ap);
+	va_end(ap);
 }
 
 
@@ -492,154 +502,152 @@ void rose_fatal(const char *fmt, ...)
  *  rose_get_param - send a Request and wait (<=1 s) for the reply.
  * -----------------------------------------------------------------*/
 i64 rose_get_param(rose_node *n,
-                   char *param_name, i64 param_name_length,
-                   mirage_msg *param)
-{
-    if (!n || !param_name || param_name_length <= 0 || !param)
-        return ROSE_ERR_BADINPUT;
-    
-    static mirage_msg *req = NULL;
+		   char *param_name, i64 param_name_length,
+		   mirage_msg *param) {
+	if(!n || !param_name || param_name_length <= 0 || !param) {
+		return ROSE_ERR_BADINPUT;
+	}
 
-    /* ---------- 1.  Build the node identifier string ---------- */
-    size_t node_id_len = (size_t)n->prefix_length + (size_t)n->name_length;
-    char node_id[512];
-    snprintf(node_id, sizeof(node_id), "%s%s", n->prefix, n->name);
+	static mirage_msg *req = NULL;
 
-    /* ---------- 2.  Build the request Mirage message ---------- */
-    /* Allocate a temporary request buffer - generous size. */
-    if(!req) {
-    	req = mirage_create(1024, n->allocator);
-    	if (!req)
-        	return ROSE_ERR_BUFFERSIZE;
-    }
-    
+	/* ---------- 1.  Build the node identifier string ---------- */
+	size_t node_id_len = (size_t) n->prefix_length + (size_t) n->name_length;
+	char node_id[512];
+	snprintf(node_id, sizeof(node_id), "%s%s", n->prefix, n->name);
 
-    int64_t err = 0;
-    err |= mirage_write_start(req);
-    err |= mirage_write_fn(req, "Request", (int64_t)strlen("Request"), 2);
-    err |= mirage_write_string(req, param_name, (int64_t)param_name_length);
-    err |= mirage_write_string(req, node_id, (int64_t)strlen(node_id));
+	/* ---------- 2.  Build the request Mirage message ---------- */
+	/* Allocate a temporary request buffer - generous size. */
+	if(!req) {
+		req = mirage_create(1024, n->allocator);
+		if(!req) {
+			return ROSE_ERR_BUFFERSIZE;
+		}
+	}
 
-    if (err < 0) {
-        mirage_destroy(&req, 0);
-        return ROSE_ERR_BADINPUT;
-    }
 
-    /* ---------- 3.  Send the request ---------- */
-    int64_t rc = quicksand_write(n->param_pub.pub, req->data, (int64_t)req->length);
-    mirage_destroy(&req, 0);
-    if (rc != 0)
-        return rc;               /* propagate quicksand error */
+	int64_t err = 0;
+	err |= mirage_write_start(req);
+	err |= mirage_write_fn(req, "Request", (int64_t) strlen("Request"), 2);
+	err |= mirage_write_string(req, param_name, (int64_t) param_name_length);
+	err |= mirage_write_string(req, node_id, (int64_t) strlen(node_id));
 
-    /* ---------- 4.  Wait for a reply (<=1 s) ---------- */
-    uint64_t start_ts = quicksand_now();
-    const f64 timeout_ns = 1e9;          /* 1 second */
-    while (quicksand_ns(quicksand_now(), start_ts) < timeout_ns) {
-        int64_t sz = (int64_t)param->max_length;
-        int64_t r = quicksand_read_latest(n->param_sub.sub,
-                                          param->data,
-                                          &sz);
-        if (r >= 0) {
-            param->length = (u64)sz;
-            return 0;
-        }
-        rose_sleep(1e-3);
-    }
+	if(err < 0) {
+		mirage_destroy(&req, 0);
+		return ROSE_ERR_BADINPUT;
+	}
 
-    /* ---------- 5.  Timeout ---------- */
-    fprintf(stderr,
-            "rose_get_param: timeout waiting for reply to \"%.*s\"\n",
-            (int)param_name_length, param_name);
-    return ROSE_NO_DATA;
+	/* ---------- 3.  Send the request ---------- */
+	int64_t rc = quicksand_write(n->param_pub.pub, req->data, (int64_t) req->length);
+	mirage_destroy(&req, 0);
+	if(rc != 0) {
+		return rc; /* propagate quicksand error */
+	}
+
+	/* ---------- 4.  Wait for a reply (<=1 s) ---------- */
+	uint64_t start_ts = quicksand_now();
+	const f64 timeout_ns = 1e9; /* 1 second */
+	while(quicksand_ns(quicksand_now(), start_ts) < timeout_ns) {
+		int64_t sz = (int64_t) param->max_length;
+		int64_t r = quicksand_read_latest(n->param_sub.sub,
+						  param->data,
+						  &sz);
+		if(r >= 0) {
+			param->length = (u64) sz;
+			return 0;
+		}
+		rose_sleep(1e-3);
+	}
+
+	/* ---------- 5.  Timeout ---------- */
+	fprintf(stderr,
+		"rose_get_param: timeout waiting for reply to \"%.*s\"\n",
+		(int) param_name_length, param_name);
+	return ROSE_NO_DATA;
 }
 
-i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length, 
-		mirage_msg *param) {
-    if (!n || !param)
-        return ROSE_ERR_BADINPUT;
+i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
+		   mirage_msg *param) {
+	if(!n || !param) {
+		return ROSE_ERR_BADINPUT;
+	}
 
-    /* Static buffer for the wrapped message */
-    static mirage_msg *m = NULL;
-    if (!m) {
-        m = mirage_create(8192, 0);
-        if (!m)
-            return ROSE_ERR_BUFFERSIZE;
-    }
+	/* Static buffer for the wrapped message */
+	static mirage_msg *m = NULL;
+	if(!m) {
+		m = mirage_create(8192, 0);
+		if(!m) {
+			return ROSE_ERR_BUFFERSIZE;
+		}
+	}
 
-    /* Reset the message to start a new packet */
-    mirage_write_start(m);
+	/* Reset the message to start a new packet */
+	mirage_write_start(m);
 
-    /* Write the List header - two arguments */
-    mirage_write_fn(m, "List", (int64_t)strlen("List"), 2);
+	/* Write the List header - two arguments */
+	mirage_write_fn(m, "List", (int64_t) strlen("List"), 2);
 
-    /* First argument: param name - use the node name for simplicity. */
-    mirage_write_string(m, param_name, param_name_length);
+	/* First argument: param name - use the node name for simplicity. */
+	mirage_write_string(m, param_name, param_name_length);
 
-    /* Second argument: copy of the original message data,
+	/* Second argument: copy of the original message data,
        skipping the 2-byte start marker. */
-    int64_t data_len = (param->cursor > 2) ? param->cursor - 2 : 0;
-    if (data_len > 0)
-        mirage_write_string(m, param->data + 2, data_len);
+	int64_t data_len = (param->cursor > 2) ? param->cursor - 2 : 0;
+	if(data_len > 0) {
+		mirage_write_string(m, param->data + 2, data_len);
+	}
 
-    /* Send the wrapped message */
-    return quicksand_write(n->param_pub.pub, m->data, (int64_t)m->cursor);
+	/* Send the wrapped message */
+	return quicksand_write(n->param_pub.pub, m->data, (int64_t) m->cursor);
 }
 
 // ------------------------- Timing Utilities ----------------------------------
-u64 rose_now(void)
-{
-    return quicksand_now();
+u64 rose_now(void) {
+	return quicksand_now();
 }
 
-void rose_timer_calibrate_seconds(f64 seconds)
-{
-    quicksand_ns_calibrate(seconds * 1e9);
+void rose_timer_calibrate_seconds(f64 seconds) {
+	quicksand_ns_calibrate(seconds * 1e9);
 }
 
-f64 rose_seconds(u64 stop, u64 start)
-{
-    return quicksand_ns(stop, start) * 1e-9;
+f64 rose_seconds(u64 stop, u64 start) {
+	return quicksand_ns(stop, start) * 1e-9;
 }
 
-f64 rose_nanoseconds(u64 stop, u64 start)
-{
-    return (f64)quicksand_ns(stop, start);
+f64 rose_nanoseconds(u64 stop, u64 start) {
+	return (f64) quicksand_ns(stop, start);
 }
 
 /* The header is missing a semicolon after the prototype; we provide the
    matching definition anyway. */
-f64 rose_elapsed_seconds(u64 start)
-{
-    return rose_seconds(quicksand_now(), start);
+f64 rose_elapsed_seconds(u64 start) {
+	return rose_seconds(quicksand_now(), start);
 }
 
-f64 rose_elapsed_nanoseconds(u64 start)
-{
-    return rose_nanoseconds(quicksand_now(), start);
+f64 rose_elapsed_nanoseconds(u64 start) {
+	return rose_nanoseconds(quicksand_now(), start);
 }
 
 // ------------------------- Sleep Utilities -----------------------------------
-void rose_sleep(f64 seconds)
-{
-    quicksand_sleep(seconds * 1e9);
+void rose_sleep(f64 seconds) {
+	quicksand_sleep(seconds * 1e9);
 }
 
 /* Simple 1-step rate-maintaining sleep. */
-void rose_sleep_rate(f64 hz)
-{
-    static u64 last_ts = 0;
-    const f64 period_ns = 1e9 / hz;
+void rose_sleep_rate(f64 hz) {
+	static u64 last_ts = 0;
+	const f64 period_ns = 1e9 / hz;
 
-    if (last_ts == 0) {
-        last_ts = quicksand_now();
-        return;
-    }
+	if(last_ts == 0) {
+		last_ts = quicksand_now();
+		return;
+	}
 
-    u64 now = quicksand_now();
-    f64 elapsed = quicksand_ns(now, last_ts);
-    f64 to_sleep = period_ns - elapsed;
-    if (to_sleep > 0.0)
-        quicksand_sleep(to_sleep);
+	u64 now = quicksand_now();
+	f64 elapsed = quicksand_ns(now, last_ts);
+	f64 to_sleep = period_ns - elapsed;
+	if(to_sleep > 0.0) {
+		quicksand_sleep(to_sleep);
+	}
 
-    last_ts = quicksand_now();
+	last_ts = quicksand_now();
 }

@@ -1,47 +1,70 @@
 #ifndef ROS3_H
 #define ROS3_H
 
-#include <quicksand.h>
-#include <quicksand_style.h>
 #include <mirage.h>
+#include <quicksand.h>
+
+#include <stdint.h>
+
+typedef int64_t i64;
+typedef int32_t i32;
+typedef int16_t i16;
+typedef int8_t i8;
+
+typedef uint64_t u64;
+typedef uint32_t u32;
+typedef uint16_t u16;
+typedef uint8_t u8;
+
+typedef float f32;
+typedef double f64;
 
 typedef mirage_msg rosemsg;
 
-typedef struct rose_node;
-typedef struct rose_publisher;
-typedef struct rose_subscriber;
+struct rose_node;
+struct rose_publisher;
+struct rose_subscriber;
 
-typedef struct {
-	char *name;
-	u64 name_length;
-	char *prefix;
-	u64 prefix_length;
-	char *remaps;
-	u64 *remap_strlens;
-	u64 remap_count;
-	rose_publisher *pubs;
-	u64 pubs_length;
-	rose_subscriber *subs;
-	u64 subs_length;
-	rose_publisher rosemaster_pub;
-	rose_subscriber control_sub; 
-	rose_publisher param_pub;
-	rose_subscriber param_sub;
-	rose_publisher log_pub;
-	void *(*allocator)(size_t); // optional allocator
-	void (*deallocator)(void *); // optional deallocator
-} rose_node;
+typedef struct rose_node        rose_node;
+typedef struct rose_publisher   rose_publisher;
+typedef struct rose_subscriber  rose_subscriber;
 
-typedef struct {
-	rose_node *node;
-	quicksand_connection *pub;
-} rose_publisher;
+/* Full definitions --------------------------------------------------- */
+struct rose_publisher {
+    rose_node *node;
+    void *pub;          /* quicksand_connection* in real code */
+};
 
-typedef struct {
-	rose_node *node;
-	quicksand_connection *sub;
-	void (*callback)(u8 *); // optional callback function pointer
-} rose_subscriber;
+struct rose_subscriber {
+    rose_node *node;
+    void *sub;          /* quicksand_connection* in real code */
+    void (*callback)(uint8_t *);
+};
+
+struct rose_node {
+    char *name;
+    uint64_t name_length;
+    char *prefix;
+    uint64_t prefix_length;
+    char *remaps;
+    uint64_t *remap_strlens;
+    uint64_t remap_count;
+
+    rose_publisher *pubs;
+    uint64_t pubs_length;
+    rose_subscriber *subs;
+    uint64_t subs_length;
+
+    rose_publisher rosemaster_pub;
+    rose_subscriber control_sub;
+    rose_publisher param_pub;
+    rose_subscriber param_sub;
+    rose_publisher log_pub;
+
+    void *(*allocator)(size_t);
+    void (*deallocator)(void *);
+};
+
 
 typedef enum {
 	ROSE_OK = 0,
@@ -54,21 +77,21 @@ typedef enum {
 
 /// ---------------- Initialization---------------------------------------------
 
-rose_node *rose_init(char argc, char **argv, char* name,
-	void *(*alloc)(size_t), void (*deallocator)(void *));
+rose_node *rose_init(char argc, char **argv, char *name,
+		     void *(*alloc)(size_t), void (*deallocator)(void *));
 
-rose_node *rose_create_node(char* name, i64 name_length, 
-	char* prefix, i64 prefix_len,
-	char *remaps, i64* remap_string_lengths, u64 remap_count,
-	void *(*alloc)(size_t), void (*deallocator)(void *));
+rose_node *rose_create_node(char *name, i64 name_length,
+			    char *prefix, i64 prefix_len,
+			    char *remaps, i64 *remap_string_lengths, u64 remap_count,
+			    void *(*alloc)(size_t), void (*deallocator)(void *));
 
 /// ---------------- Pub / Sub -------------------------------------------------
 
 rose_publisher *rose_create_pub(rose_node *n, char *name, i64 name_length,
-		u64 message_length, u64 message_hz);
+				u64 message_length, u64 message_hz);
 
 rose_subscriber *rose_create_sub(rose_node *n, char *name, i64 name_length,
-		u64 latest_only, void (*callback)(u8 *));
+				 u64 latest_only, void (*callback)(u8 *));
 
 i64 rose_publish(rose_publisher *p, rosemsg *msg);
 
@@ -82,17 +105,17 @@ void rose_spin_forever(rose_node *n);
 
 /// ---------------- Parameters ------------------------------------------------
 
-i64 rose_get_param(rose_node *n, char* param_name, i64 param_name_length,
-	mirage_msg *param);
+i64 rose_get_param(rose_node *n, char *param_name, i64 param_name_length,
+		   mirage_msg *param);
 
 i64 rose_set_param(rose_node *n, mirage_msg *param);
 
 /// ---------------- Parameters ------------------------------------------------
 
 void rose_log(rose_node *node,
-              int level,
-              const char *fmt,
-              ...);
+	      int level,
+	      const char *fmt,
+	      ...);
 
 // Convenience wrappers that use the last crated node.
 void rose_info(const char *fmt, ...);
@@ -111,7 +134,7 @@ f64 rose_seconds(u64 stop, u64 start);
 
 f64 rose_nanoseconds(u64 stop, u64 start);
 
-f64 rose_elapsed_seconds(u64 stop)
+f64 rose_elapsed_seconds(u64 stop);
 
 f64 rose_elapsed_nanoseconds(u64 start);
 
