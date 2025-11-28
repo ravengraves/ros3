@@ -76,9 +76,9 @@ i64 rose_read(rose_subscriber *s, rosemsg *msg);
 
 i64 rose_readlast(rose_subscriber *s, rosemsg *msg);
 
-void rose_spin_once(void);
+void rose_spin_once(rose_node *n);
 
-void rose_spin_forever(void);
+void rose_spin_forever(rose_node *n);
 
 /// ---------------- Parameters ------------------------------------------------
 
@@ -105,20 +105,20 @@ void rose_fatal(const char *fmt, ...);
 
 u64 rose_now(void);
 
-void rose_timer_calibrate_seconds(double seconds);
+void rose_timer_calibrate_seconds(f64 seconds);
 
-double rose_seconds(u64 stop, u64 start);
+f64 rose_seconds(u64 stop, u64 start);
 
-double rose_nanoseconds(u64 stop, u64 start);
+f64 rose_nanoseconds(u64 stop, u64 start);
 
-double rose_elapsed_seconds(u64 stop)
+f64 rose_elapsed_seconds(u64 stop)
 
-double rose_elapsed_nanoseconds(u64 start);
+f64 rose_elapsed_nanoseconds(u64 start);
 
 /// ---------------- Sleep -----------------------------------------------------
 
-void rose_sleep(double seconds);
+void rose_sleep(f64 seconds);
 
-void rose_sleep_rate(double hz);
+void rose_sleep_rate(f64 hz);
 
 #endif // ROS3_H

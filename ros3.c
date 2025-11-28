@@ -38,8 +38,8 @@ rose_node *rose_init(char argc, char **argv, char* name_in,
 		deallocate = (void (*)(void *)) dealloc;
 	}
 
-	i64 *remap_lens = allocate(REMAP_COUNT*2); // lengths
 	char *remaps; = allocate(REMAP_SIZE);
+	i64 *remap_lens = allocate(REMAP_COUNT*2); // lengths
 	u64 remap_count = 0;
 
 	char *remap_head = remaps; // pointer to front
@@ -244,17 +244,17 @@ rose_publisher *rose_create_pub(rose_node *n,
 	if (name[0] == '/')
 		snprintf(topic, sizeof(topic), "%.*s", (int)nlen, name);
 	else
-		snprintf(topic, sizeof(topic), "%s%.*s",
-	n->prefix, (int)nlen, name);
+		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int)nlen, name);
+	if (n->pubs_length >= MAX_PUBSUB)
+        	return NULL;
 
 	rose_publisher *pub = n->pubs + pubs_length;
 	pub->node = n;
 
-	int64_t ret = quicksand_connect(&pub->pub,
-	topic, -1,
-	(int64_t)message_length,
-	(int64_t)message_hz,
-	n->allocator);
+	int64_t ret = quicksand_connect(&pub->pub, topic, -1,
+			(int64_t)message_length,
+			(int64_t)message_hz,
+			n->allocator);
 	if (ret != 0) {
 		return NULL;
 	}
@@ -276,8 +276,10 @@ rose_subscriber *rose_create_sub(rose_node *n,
 	if (name[0] == '/')
 		snprintf(topic, sizeof(topic), "%.*s", (int)nlen, name);
 	else
-		snprintf(topic, sizeof(topic), "%s%.*s",
-	n->prefix, (int)nlen, name);
+		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int)nlen, name);
+
+	if (n->subs_length >= MAX_PUBSUB)
+        	return NULL;
 
 	rose_publisher *sub = n->subs + subs_length;
 	sub->node = n;
@@ -332,12 +334,15 @@ i64 rose_readlast(rose_subscriber *s, rosemsg *msg)
 
 void rose_spin_once(rose_node *n)
 {
-	static mirage_msg *m = mirage_create(1920*1080*3, n->allocator);
-	if (!m) 
+	if (!node)
+        	return;
+
+	static mirage_msg *m = NULL;
+	if (!m) {
 		m = mirage_create(1920*1080*3, n->allocator);
-	if (!m)
-		return;
-    	return; /* allocation failure */
+		if (!m)
+			return; // allocation failure
+	}
 	for (size_t i = 0; i < node->subs_length; ++i) {
 		rose_subscriber *sub = node->subs[i];
 		if (!sub->callback)
@@ -345,8 +350,7 @@ void rose_spin_once(rose_node *n)
 		m->length = m->max_length;
 		int64_t ret = quicksand_read_latest(sub->sub, m->data, &m->length);
 		if (ret >= 0) {
-			/* The user-provided callback receives the raw payload. */
-			sub->callback(m);
+			sub->callback(m);  // run callback
 		}
 	}
 }
@@ -355,7 +359,7 @@ void rose_spin_forever(rose_node *node)
 {
 	while (1) {
 		rose_spin_once(node);
-		rose_sleep(1e-6);
+		rose_sleep(1e-3);
 	}
 }
 
@@ -427,11 +431,12 @@ void rose_log(rose_node *node,
     /* ------------------------------------------------------------------
      *  5.  Build and publish a Mirage message.
      * ------------------------------------------------------------------*/
-    static mirage_msg *m = mirage_create(1024, 0);
-    if (!m) 
-    	m = mirage_create(1024, 0);
-    if (!m) 
-    	return; /* allocation failure */
+    static mirage_msg *m = NULL;
+    if (!m) {
+        m = mirage_create(1024, 0);
+        if (!m)
+            return;
+    }
 
     int64_t err = 0;
     err |= mirage_write_start(m);              /* message start marker */
@@ -441,7 +446,8 @@ void rose_log(rose_node *node,
                                (int64_t)strlen(user_msg));
 
     if (err >= 0 && node && node->log_pub.pub) {
-        quicksand_write(node->log_pub.pub, m->data, (int64_t)m->length);
+        int64_t msg_len = m->cursor;
+        quicksand_write(node->log_pub.pub, m->data, msg_len);
     }
 
     mirage_destroy(&m, 0);
@@ -491,33 +497,28 @@ i64 rose_get_param(rose_node *n,
 {
     if (!n || !param_name || param_name_length <= 0 || !param)
         return ROSE_ERR_BADINPUT;
+    
+    static mirage_msg *req = NULL;
 
     /* ---------- 1.  Build the node identifier string ---------- */
     size_t node_id_len = (size_t)n->prefix_length + (size_t)n->name_length;
-    char *node_id = rose_alloc(n, node_id_len + 1);
-    memcpy(node_id, n->prefix, (size_t)n->prefix_length);
-    memcpy(node_id + n->prefix_length, n->name, (size_t)n->name_length);
-    node_id[node_id_len] = '\0';
+    char node_id[512];
+    snprintf(node_id, sizeof(node_id), "%s%s", n->prefix, n->name);
 
     /* ---------- 2.  Build the request Mirage message ---------- */
     /* Allocate a temporary request buffer - generous size. */
-    int64_t req_buf_sz = (int64_t)(param->max_length   /* the param payload   */
-                                  + node_id_len        /* node string         */
-                                  + 256);              /* overhead            */
-    mirage_msg *req = mirage_create(req_buf_sz, 0);
-    if (!req) {
-        rose_dealloc(n, (void **)&node_id);
-        return ROSE_ERR_BADINPUT;
+    if(!req) {
+    	req = mirage_create(1024, n->allocator);
+    	if (!req)
+        	return ROSE_ERR_BUFFERSIZE;
     }
+    
 
     int64_t err = 0;
-    err |= mirage_write_start(req);                                   /* start */
+    err |= mirage_write_start(req);
     err |= mirage_write_fn(req, "Request", (int64_t)strlen("Request"), 2);
-    /* arg0 : the parameter payload (as a nested Mirage message) */
-    err |= mirage_write_msg(req, param);                               /* embed */
-    /* arg1 : node identifier string */
-    err |= mirage_write_string(req, node_id, (int64_t)node_id_len);
-    rose_dealloc(n, (void **)&node_id);
+    err |= mirage_write_string(req, param_name, (int64_t)param_name_length);
+    err |= mirage_write_string(req, node_id, (int64_t)strlen(node_id));
 
     if (err < 0) {
         mirage_destroy(&req, 0);
@@ -532,17 +533,17 @@ i64 rose_get_param(rose_node *n,
 
     /* ---------- 4.  Wait for a reply (<=1 s) ---------- */
     uint64_t start_ts = quicksand_now();
-    const double timeout_ns = 1e9;          /* 1 second */
+    const f64 timeout_ns = 1e9;          /* 1 second */
     while (quicksand_ns(quicksand_now(), start_ts) < timeout_ns) {
         int64_t sz = (int64_t)param->max_length;
         int64_t r = quicksand_read_latest(n->param_sub.sub,
                                           param->data,
                                           &sz);
-        if (r >= 0) {                      /* a message arrived */
+        if (r >= 0) {
             param->length = (u64)sz;
-            return 0;                      /* success */
+            return 0;
         }
-        rose_sleep(1e-3);                 /* 1 ms poll interval */
+        rose_sleep(1e-3);
     }
 
     /* ---------- 5.  Timeout ---------- */
@@ -552,18 +553,37 @@ i64 rose_get_param(rose_node *n,
     return ROSE_NO_DATA;
 }
 
-i64 rose_set_param(rose_node *n,
-                   char *param_name, i64 param_name_length,
-                   mirage_msg *param)
-{
-    (void)param_name_length;   /* unused */
-
+i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length, 
+		mirage_msg *param) {
     if (!n || !param)
         return ROSE_ERR_BADINPUT;
 
-    return quicksand_write(n->param_pub.pub, param->data, (int64_t)param->length);
-}
+    /* Static buffer for the wrapped message */
+    static mirage_msg *m = NULL;
+    if (!m) {
+        m = mirage_create(8192, 0);
+        if (!m)
+            return ROSE_ERR_BUFFERSIZE;
+    }
 
+    /* Reset the message to start a new packet */
+    mirage_write_start(m);
+
+    /* Write the List header - two arguments */
+    mirage_write_fn(m, "List", (int64_t)strlen("List"), 2);
+
+    /* First argument: param name - use the node name for simplicity. */
+    mirage_write_string(m, param_name, param_name_length);
+
+    /* Second argument: copy of the original message data,
+       skipping the 2-byte start marker. */
+    int64_t data_len = (param->cursor > 2) ? param->cursor - 2 : 0;
+    if (data_len > 0)
+        mirage_write_string(m, param->data + 2, data_len);
+
+    /* Send the wrapped message */
+    return quicksand_write(n->param_pub.pub, m->data, (int64_t)m->cursor);
+}
 
 // ------------------------- Timing Utilities ----------------------------------
 u64 rose_now(void)
@@ -571,44 +591,44 @@ u64 rose_now(void)
     return quicksand_now();
 }
 
-void rose_timer_calibrate_seconds(double seconds)
+void rose_timer_calibrate_seconds(f64 seconds)
 {
     quicksand_ns_calibrate(seconds * 1e9);
 }
 
-double rose_seconds(u64 stop, u64 start)
+f64 rose_seconds(u64 stop, u64 start)
 {
     return quicksand_ns(stop, start) * 1e-9;
 }
 
-double rose_nanoseconds(u64 stop, u64 start)
+f64 rose_nanoseconds(u64 stop, u64 start)
 {
-    return (double)quicksand_ns(stop, start);
+    return (f64)quicksand_ns(stop, start);
 }
 
 /* The header is missing a semicolon after the prototype; we provide the
    matching definition anyway. */
-double rose_elapsed_seconds(u64 start)
+f64 rose_elapsed_seconds(u64 start)
 {
     return rose_seconds(quicksand_now(), start);
 }
 
-double rose_elapsed_nanoseconds(u64 start)
+f64 rose_elapsed_nanoseconds(u64 start)
 {
     return rose_nanoseconds(quicksand_now(), start);
 }
 
 // ------------------------- Sleep Utilities -----------------------------------
-void rose_sleep(double seconds)
+void rose_sleep(f64 seconds)
 {
     quicksand_sleep(seconds * 1e9);
 }
 
 /* Simple 1-step rate-maintaining sleep. */
-void rose_sleep_rate(double hz)
+void rose_sleep_rate(f64 hz)
 {
     static u64 last_ts = 0;
-    const double period_ns = 1e9 / hz;
+    const f64 period_ns = 1e9 / hz;
 
     if (last_ts == 0) {
         last_ts = quicksand_now();
@@ -616,8 +636,8 @@ void rose_sleep_rate(double hz)
     }
 
     u64 now = quicksand_now();
-    double elapsed = quicksand_ns(now, last_ts);
-    double to_sleep = period_ns - elapsed;
+    f64 elapsed = quicksand_ns(now, last_ts);
+    f64 to_sleep = period_ns - elapsed;
     if (to_sleep > 0.0)
         quicksand_sleep(to_sleep);
 
