@@ -25,44 +25,44 @@ struct rose_node;
 struct rose_publisher;
 struct rose_subscriber;
 
-typedef struct rose_node        rose_node;
-typedef struct rose_publisher   rose_publisher;
-typedef struct rose_subscriber  rose_subscriber;
+typedef struct rose_node rose_node;
+typedef struct rose_publisher rose_publisher;
+typedef struct rose_subscriber rose_subscriber;
 
 /* Full definitions --------------------------------------------------- */
 struct rose_publisher {
-    rose_node *node;
-    void *pub;          /* quicksand_connection* in real code */
+	rose_node *node;
+	void *pub; /* quicksand_connection* in real code */
 };
 
 struct rose_subscriber {
-    rose_node *node;
-    void *sub;          /* quicksand_connection* in real code */
-    void (*callback)(uint8_t *);
+	rose_node *node;
+	void *sub; /* quicksand_connection* in real code */
+	void (*callback)(mirage_msg *);
 };
 
 struct rose_node {
-    char *name;
-    uint64_t name_length;
-    char *prefix;
-    uint64_t prefix_length;
-    char *remaps;
-    uint64_t *remap_strlens;
-    uint64_t remap_count;
+	char *name;
+	uint64_t name_length;
+	char *prefix;
+	uint64_t prefix_length;
+	char *remaps;
+	uint64_t *remap_strlens;
+	uint64_t remap_count;
 
-    rose_publisher *pubs;
-    uint64_t pubs_length;
-    rose_subscriber *subs;
-    uint64_t subs_length;
+	rose_publisher *pubs;
+	uint64_t pubs_length;
+	rose_subscriber *subs;
+	uint64_t subs_length;
 
-    rose_publisher rosemaster_pub;
-    rose_subscriber control_sub;
-    rose_publisher param_pub;
-    rose_subscriber param_sub;
-    rose_publisher log_pub;
+	rose_publisher rosemaster_pub;
+	rose_subscriber control_sub;
+	rose_publisher param_pub;
+	rose_subscriber param_sub;
+	rose_publisher log_pub;
 
-    void *(*allocator)(size_t);
-    void (*deallocator)(void *);
+	void *(*allocator)(size_t);
+	void (*deallocator)(void *);
 };
 
 
@@ -82,7 +82,7 @@ rose_node *rose_init(char argc, char **argv, char *name,
 
 rose_node *rose_create_node(char *name, i64 name_length,
 			    char *prefix, i64 prefix_len,
-			    char *remaps, i64 *remap_string_lengths, u64 remap_count,
+			    char *remaps, u64 *remap_string_lengths, u64 remap_count,
 			    void *(*alloc)(size_t), void (*deallocator)(void *));
 
 /// ---------------- Pub / Sub -------------------------------------------------
@@ -91,7 +91,9 @@ rose_publisher *rose_create_pub(rose_node *n, char *name, i64 name_length,
 				u64 message_length, u64 message_hz);
 
 rose_subscriber *rose_create_sub(rose_node *n, char *name, i64 name_length,
-				 u64 latest_only, void (*callback)(u8 *));
+				 u64 latest_only, void (*callback)(mirage_msg *));
+
+void rose_delete_subscriber(rose_node *n, rose_subscriber *s);
 
 i64 rose_publish(rose_publisher *p, rosemsg *msg);
 
@@ -108,7 +110,8 @@ void rose_spin_forever(rose_node *n);
 i64 rose_get_param(rose_node *n, char *param_name, i64 param_name_length,
 		   mirage_msg *param);
 
-i64 rose_set_param(rose_node *n, mirage_msg *param);
+i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
+		   mirage_msg *param);
 
 /// ---------------- Parameters ------------------------------------------------
 

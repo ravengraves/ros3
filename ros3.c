@@ -1,6 +1,7 @@
 #include "ros3.h"
 
 #include <assert.h>
+#include <stdarg.h>   /* vaargs */
 #include <stdio.h>    /* snprintf */
 #include <stdlib.h>   /* malloc, free */
 #include <string.h>   /* strlen, strcpy, memcpy */
@@ -20,17 +21,17 @@ static void *rose_alloc(rose_node *node, size_t size) {
 	return malloc(size);
 }
 
-static void rose_dealloc(rose_node *node, void **ptr) {
-	if(!ptr || !(*ptr)) {
-		return;
-	}
-	if(node && node->deallocator) {
-		node->deallocator(ptr);
-	} else {
-		free(ptr);
-	}
-	*ptr = 0;
-}
+// static void rose_dealloc(rose_node *node, void **ptr) {
+// 	if(!ptr || !(*ptr)) {
+// 		return;
+// 	}
+// 	if(node && node->deallocator) {
+// 		node->deallocator(ptr);
+// 	} else {
+// 		free(ptr);
+// 	}
+// 	*ptr = 0;
+// }
 
 rose_node *rose_init(char argc, char **argv, char *name_in,
 		     void *(*alloc)(size_t), void (*dealloc)(void *)) {
@@ -43,27 +44,24 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 		deallocate = (void (*)(void *)) dealloc;
 	}
 
-	char *remaps;
-	= allocate(REMAP_SIZE);
-	i64 *remap_lens = allocate(REMAP_COUNT * 2); // lengths
+	char *remaps = allocate(REMAP_SIZE);
+	u64 *remap_lens = allocate(REMAP_COUNT * 2); // lengths
 	u64 remap_count = 0;
 
 	char *remap_head = remaps; // pointer to front
 
 	char prefix[256] = "/rose/";
-	if(name_in[0] == "/") {
-		prefix[0] = "\0"; // provided global-namespaced name.
+	if(name_in[0] == '/') {
+		prefix[0] = '\0'; // provided global-namespaced name.
 	}
 	char name[256];
-	snprintf(name, strlen(name_in) + 1, "%s", name_in)
-
-			size_t remap_count = 0;
+	snprintf(name, strlen(name_in) + 1, "%s", name_in);
 
 	// remap args should be local:=global or __ns:=ns or __name:=name
 	// string parsing is so much fun
 	for(int i = 1; i < argc; ++i) {
 		const char *arg = argv[i];
-		const size_t arglen = strlen(arg);
+		size_t arglen = strlen(arg);
 		assert(arglen < 254 && "Error: Argument too long.");
 
 		char *remap = strstr(arg, ":=");
@@ -71,22 +69,21 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 			continue; // not a remap, no ":="
 		}
 		remap += 2; // start after ":="
-		assert(remap - arg < arglen && remap - 2 != arg && "Error: Remap is empty.");
+		assert(remap - arg < (long) arglen && remap - 2 != arg && "Error: Remap is empty.");
 
 		// input / global cannot contain ":" or "//"
-		assert(strnstr(arg, ":", remap - arg) == 0 && strnstr(remap, ":", (arg + arglen) - remap) == 0 && "Error: Invalid remap contains extra ':'");
+		assert(strstr(remap, ":") == 0 && "Error: Invalid remap contains extra ':'");
 		assert(strstr(arg, "//") == 0 && "Error: Invalid remap contains '//'");
 
 		// special __ns or __name remap
 		if(strncmp(arg, "__ns:=", strlen("__ns:=")) == 0) {
-			if(arg[arglen] == "/") { // strip terminating '/'
+			if(arg[arglen] == '/') { // strip terminating '/'
 				arglen -= 1;
 			}
-			int nslen = arglen - strlen("__ns:=") + 2 // '/' + null
-					if(remap[0] == "/") {	  // global prefix, leading '/'
+			int nslen = arglen - strlen("__ns:=") + 2; // '/' + null
+			if(remap[0] == '/') {			   // global prefix, leading '/'
 				snprintf(prefix, nslen, "%s/", remap);
-			}
-			else { // default namespace prefix
+			} else { // default namespace prefix
 				nslen += strlen("/rose/");
 				snprintf(prefix, nslen, "/rose/%s/", remap);
 			}
@@ -94,13 +91,13 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 		}
 
 		if(strncmp(arg, "__name:=", strlen("__name:=")) == 0) {
-			if(arg[arglen] == "/") { // strip terminating '/'
+			if(arg[arglen] == '/') { // strip terminating '/'
 				arglen -= 1;
 			}
-			if(remap[0] == "/") { // stkip starting '/'
+			if(remap[0] == '/') { // stkip starting '/'
 				remap += 1;
 			}
-			snprintf(name, remap, arglen - (remap - arg) + 1, "%s", remap);
+			snprintf(name, arglen - (remap - arg) + 1, "%s", remap);
 			continue;
 		}
 
@@ -122,22 +119,23 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 				(i64) strlen(name),
 				prefix,
 				(i64) strlen(prefix),
-				remap_buf,
-				(i64 *) remap_lens,
-				remap_cnt,
+				remaps,
+				remap_lens,
+				remap_count,
 				allocate,
 				deallocate);
 }
 
 rose_node *rose_create_node(char *in_name, i64 name_len,
 			    char *in_prefix, i64 prefix_len,
-			    char *remaps, i64 *remap_string_lengths, u64 remap_count,
+			    char *remaps, u64 *remap_string_lengths, u64 remap_count,
 			    void *(*alloc)(size_t), void (*dealloc)(void *)) {
 	void *(*allocate)(size_t) = malloc;
 	if(alloc) {
 		allocate = (void *(*) (size_t) ) alloc;
 	}
-	void (*deallocate)(void *) = free if(dealloc) {
+	void (*deallocate)(void *) = free;
+	if(dealloc) {
 		deallocate = (void (*)(void *)) dealloc;
 	}
 
@@ -152,9 +150,9 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 		prefix_len = 6;
 	}
 	if(prefix_len == -1) {
-		prefix_len = strlen(in_prefix)
+		prefix_len = strlen(in_prefix);
 	}
-	if(in_prefix[0] != "/") {
+	if(in_prefix[0] != '/') {
 		snprintf(topic + 6, prefix_len + 6 + 1, "%s", in_prefix);
 		in_prefix = topic;
 		prefix_len = prefix_len + 6;
@@ -162,24 +160,24 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 
 	// default to strlen if provided len is -1.
 	if(name_len == -1) {
-		name_len = strlen(in_name)
+		name_len = strlen(in_name);
 	}
 	assert(name_len < 255 && "Prefix is too long");
 
-	rose_node n = allocate(sizeof(rose_node));
+	rose_node *n = allocate(sizeof(rose_node));
 	n->allocator = allocate;
 	n->deallocator = deallocate;
 
 	char *name = rose_alloc(n, name_len + 64);
 	memcpy(name, in_name, (size_t) name_len);
-	sprintf(name + name_length, "-%d", (int) getpid());
+	sprintf(name + name_len, "-%d", (int) getpid());
 	n->name = name;
 	n->name_length = strlen(name);
 
 	char *prefix = rose_alloc(n, prefix_len + 1);
 	snprintf(prefix, prefix_len + 1, "%s", in_prefix);
 	n->prefix = prefix;
-	n->prefix_len = prefix_len;
+	n->prefix_length = prefix_len;
 
 	n->remaps = remaps;
 	n->remap_strlens = remap_string_lengths;
@@ -193,7 +191,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 
 	// find where base prefix ends (default "/rose/")
 	i64 base_prefix_len = 1;
-	while(prefix[base_prefix_len] != "/") {
+	while(prefix[base_prefix_len] != '/') {
 		base_prefix_len += 1;
 	}
 	base_prefix_len += 1;
@@ -202,33 +200,33 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	i64 res = 0;
 	memcpy(topic, prefix, base_prefix_len); // base_prefix
 	sprintf(topic + base_prefix_len, "%s", "rosemaster");
-	res = quicksand_connect(&n->rosemaster_pub, topic, -1, 512, 8192, allocate);
-	assert(res == 0 && "Error: could not map rosemaster ring.")
-			n->rosemaster_pub.node = n;
+	res = quicksand_connect(n->rosemaster_pub.pub, topic, -1, 512, 8192, (void *) allocate);
+	assert(res == 0 && "Error: could not map rosemaster ring.");
+	n->rosemaster_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
-	res = quicksand_connect(&n->log_pub, topic, -1, 1024, 8192, allocate);
-	assert(res == 0 && "Error: could not map roselog ring.")
-			n->log_pub.node = n;
+	res = quicksand_connect(n->log_pub.pub, topic, -1, 1024, 8192, (void *) allocate);
+	assert(res == 0 && "Error: could not map roselog ring.");
+	n->log_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "param_query");
-	res = quicksand_connect(&n->param_pub, topic, -1, 512, 8192, allocate);
-	assert(re == 0 && "Error: could not map param_query ring.");
+	res = quicksand_connect(n->param_pub.pub, topic, -1, 512, 8192, (void *) allocate);
+	assert(res == 0 && "Error: could not map param_query ring.");
 	n->param_pub.node = n;
 
 	// full prefix
 	memcpy(topic, prefix, prefix_len + 1);
-	snprintf(topic + prefix_len, name_len + 2 "%s/", name);
+	snprintf(topic + prefix_len, name_len + 2, "%s/", name);
 	sprintf(topic + base_prefix_len + name_len + 1, "%s", "params");
-	res = quicksand_connect(&n->param_sub, topic, -1, 1024, 1024, allocate);
-	assert(res == 0 && "Error: could not map node params ring.")
-			n->param_sub.node = n;
+	res = quicksand_connect(n->param_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
+	assert(res == 0 && "Error: could not map node params ring.");
+	n->param_sub.node = n;
 	n->param_sub.callback = NULL;
 
 	sprintf(topic + base_prefix_len + name_len + 1, "%s", "control");
-	res = quicksand_connect(&n->param_pub, topic, -1, 1024, 1024, allocate);
-	assert(res == 0 && "Error: could not map node control ring.")
-			n->control_sub.node = n;
+	res = quicksand_connect(n->control_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
+	assert(res == 0 && "Error: could not map node control ring.");
+	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 
 	ROSE_STATIC_NODE = n;
@@ -253,25 +251,25 @@ rose_publisher *rose_create_pub(rose_node *n,
 		return NULL;
 	}
 
-	rose_publisher *pub = n->pubs + pubs_length;
+	rose_publisher *pub = n->pubs + n->pubs_length;
 	pub->node = n;
 
-	int64_t ret = quicksand_connect(&pub->pub, topic, -1,
+	int64_t ret = quicksand_connect(pub->pub, topic, -1,
 					(int64_t) message_length,
 					(int64_t) message_hz,
-					n->allocator);
+					(void *) n->allocator);
 	if(ret != 0) {
 		return NULL;
 	}
 
-	pubs_length += 1;
+	n->pubs_length += 1;
 	return pub;
 }
 
 rose_subscriber *rose_create_sub(rose_node *n,
 				 char *name, i64 name_length,
 				 u64 latest_only,
-				 void (*callback)(u8 *)) {
+				 void (*callback)(mirage_msg *)) {
 	(void) latest_only; /* not used in the minimal implementation */
 
 	assert(n && "node is NULL");
@@ -288,17 +286,29 @@ rose_subscriber *rose_create_sub(rose_node *n,
 		return NULL;
 	}
 
-	rose_publisher *sub = n->subs + subs_length;
+	rose_subscriber *sub = n->subs + n->subs_length;
 	sub->node = n;
 	sub->callback = callback;
 
-	int64_t ret = quicksand_connect(&sub->sub, topic, -1, -1, -1, n->allocator);
+	int64_t ret = quicksand_connect(sub->sub, topic, -1, -1, -1, (void *) n->allocator);
 	if(ret != 0) {
 		return NULL;
 	}
 
-	subs_length += 1;
+	n->subs_length += 1;
 	return sub;
+}
+
+
+void rose_delete_subscriber(rose_node *n, rose_subscriber *s) {
+	rose_subscriber *sub = n->subs;
+	while(sub < n->subs + n->subs_length) {
+		if(sub->sub == s->sub) {
+			sub->callback = NULL; // prevents spin from running it.
+			break;
+		}
+		sub += 1;
+	}
 }
 
 
@@ -340,7 +350,7 @@ i64 rose_readlast(rose_subscriber *s, rosemsg *msg) {
 
 
 void rose_spin_once(rose_node *n) {
-	if(!node) {
+	if(!n) {
 		return;
 	}
 
@@ -351,8 +361,8 @@ void rose_spin_once(rose_node *n) {
 			return; // allocation failure
 		}
 	}
-	for(size_t i = 0; i < node->subs_length; ++i) {
-		rose_subscriber *sub = node->subs[i];
+	for(size_t i = 0; i < n->subs_length; ++i) {
+		rose_subscriber *sub = n->subs + i;
 		if(!sub->callback) {
 			continue;
 		}
@@ -470,28 +480,28 @@ void rose_log(rose_node *node,
 void rose_info(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log_wrapper(ROSE_STATIC_NODE, 0, fmt, ap);
+	rose_log(ROSE_STATIC_NODE, 0, fmt, ap);
 	va_end(ap);
 }
 
 void rose_warn(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log_wrapper(ROSE_STATIC_NODE, 1, fmt, ap);
+	rose_log(ROSE_STATIC_NODE, 1, fmt, ap);
 	va_end(ap);
 }
 
 void rose_error(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log_wrapper(ROSE_STATIC_NODE, 2, fmt, ap);
+	rose_log(ROSE_STATIC_NODE, 2, fmt, ap);
 	va_end(ap);
 }
 
 void rose_fatal(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log_wrapper(ROSE_STATIC_NODE, 3, fmt, ap);
+	rose_log(ROSE_STATIC_NODE, 3, fmt, ap);
 	va_end(ap);
 }
 
@@ -511,7 +521,6 @@ i64 rose_get_param(rose_node *n,
 	static mirage_msg *req = NULL;
 
 	/* ---------- 1.  Build the node identifier string ---------- */
-	size_t node_id_len = (size_t) n->prefix_length + (size_t) n->name_length;
 	char node_id[512];
 	snprintf(node_id, sizeof(node_id), "%s%s", n->prefix, n->name);
 
@@ -593,7 +602,8 @@ i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
        skipping the 2-byte start marker. */
 	int64_t data_len = (param->cursor > 2) ? param->cursor - 2 : 0;
 	if(data_len > 0) {
-		mirage_write_string(m, param->data + 2, data_len);
+		memcpy(m->data + m->cursor, param->data + 2, data_len);
+		m->cursor += data_len;
 	}
 
 	/* Send the wrapped message */
