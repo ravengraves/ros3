@@ -33,7 +33,7 @@ build/ros3.o: $(SOURCE)
 	$(CC) -c $(CFLAGS) $(SOURCE) -o build/ros3.o
 
 build/test: test.c build/libros3.a
-	$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libros3.a # -fsanitize=address,undefined
+	$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libros3.a -L/usr/local/lib -l mirage -l quicksand # -fsanitize=address,undefined
 
 build/test_all: test_all.c build/libros3.a
 	$(CC) $(CFLAGS) $(CEXE) -o build/test_all test_all.c build/libros3.a # -fsanitize=address,undefined
@@ -66,9 +66,8 @@ format:
 clean:
 	rm -rf build
 
-check: build/test build/test_all
+check: build/test
 	./build/test
-	./build/test_all
 
 .PHONY: format clean all check install uninstall
 

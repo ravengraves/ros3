@@ -32,12 +32,13 @@ typedef struct rose_subscriber rose_subscriber;
 /* Full definitions --------------------------------------------------- */
 struct rose_publisher {
 	rose_node *node;
-	void *pub; /* quicksand_connection* in real code */
+	quicksand_connection *pub;
 };
 
 struct rose_subscriber {
 	rose_node *node;
-	void *sub; /* quicksand_connection* in real code */
+	quicksand_connection *sub;
+	u64 latest_only;
 	void (*callback)(mirage_msg *);
 };
 
@@ -85,6 +86,10 @@ rose_node *rose_create_node(char *name, i64 name_length,
 			    char *remaps, u64 *remap_string_lengths, u64 remap_count,
 			    void *(*alloc)(size_t), void (*deallocator)(void *));
 
+void rose_shutdown(rose_node *n);
+
+i64 rose_ok(rose_node *n);
+
 /// ---------------- Pub / Sub -------------------------------------------------
 
 rose_publisher *rose_create_pub(rose_node *n, char *name, i64 name_length,
@@ -100,6 +105,8 @@ i64 rose_publish(rose_publisher *p, rosemsg *msg);
 i64 rose_read(rose_subscriber *s, rosemsg *msg);
 
 i64 rose_readlast(rose_subscriber *s, rosemsg *msg);
+
+u64 rose_remaining(rose_subscriber *s);
 
 void rose_spin_once(rose_node *n);
 
@@ -144,6 +151,8 @@ f64 rose_elapsed_nanoseconds(u64 start);
 /// ---------------- Sleep -----------------------------------------------------
 
 void rose_sleep(f64 seconds);
+
+void rose_nanosleep(f64 nanoseconds);
 
 void rose_sleep_rate(f64 hz);
 
