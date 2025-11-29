@@ -29,7 +29,7 @@ typedef struct rose_node rose_node;
 typedef struct rose_publisher rose_publisher;
 typedef struct rose_subscriber rose_subscriber;
 
-/* Full definitions --------------------------------------------------- */
+// --------- Data types --------------------------------------------------------
 struct rose_publisher {
 	rose_node *node;
 	quicksand_connection *pub;

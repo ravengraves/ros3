@@ -9,9 +9,11 @@
 #include <sys/types.h>/* pid_t */
 #include <unistd.h>   /* getpid */
 
-#define REMAP_SIZE 4096 // at most 4kb of remap strings
-#define REMAP_COUNT 64	// at most 64 remaps
-#define MAX_PUBSUB 256	// at most n pubsubs
+
+#define REMAP_SIZE 4096			 // at most 4kb of remap strings
+#define REMAP_COUNT 64			 // at most 64 remaps
+#define MAX_PUBSUB 256			 // at most n pubsubs
+#define MAX_MESSAGE_SIZE 1920 * 1080 * 3 // max size for a "spin'd" message
 
 static rose_node *ROSE_STATIC_NODE = NULL;
 
@@ -40,8 +42,8 @@ void _rose_shutdown(void) {
 
 void _rose_signal_shutdown(int sig) {
 	(void) sig;
-	// exit(128+sig);
-	exit(0);
+	exit(128 + sig);
+	// exit(0);
 }
 
 rose_node *rose_init(char argc, char **argv, char *name_in,
@@ -61,10 +63,7 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 
 	char *remap_head = remaps; // pointer to front
 
-	char prefix[256] = "/rose/";
-	if(name_in[0] == '/') {
-		prefix[0] = '\0'; // provided global-namespaced name.
-	}
+	char prefix[256] = "/";
 	char name[256];
 	snprintf(name, strlen(name_in) + 1, "%s", name_in);
 
@@ -88,29 +87,30 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 
 		// special __ns or __name remap
 		if(strncmp(arg, "__ns:=", strlen("__ns:=")) == 0) {
-			if(arg[arglen] == '/') { // strip terminating '/'
+			if(arg[arglen - 1] == '/') { // strip terminating '/'
 				arglen -= 1;
 			}
-			int nslen = arglen - strlen("__ns:=") + 2; // '/' + null
-			if(remap[0] == '/') {			   // global prefix, leading '/'
-				snprintf(prefix, nslen, "%s/", remap);
-			} else { // default namespace prefix
-				nslen += strlen("/rose/");
-				snprintf(prefix, nslen, "/rose/%s/", remap);
+			if(arglen && remap[0] == '/') { // strip leading '/'
+				arglen -= 1;
+				remap += 1;
 			}
+			int nslen = arglen - strlen("__ns:="); // ending '/' + null
+			snprintf(prefix + 1, nslen + 2, "%s/", remap);
 			continue;
 		}
 
 		if(strncmp(arg, "__name:=", strlen("__name:=")) == 0) {
-			if(arg[arglen] == '/') { // strip terminating '/'
+			if(arg[arglen - 1] == '/') { // strip terminating '/'
 				arglen -= 1;
 			}
-			if(remap[0] == '/') { // stkip starting '/'
+			if(arglen && remap[0] == '/') { // stkip starting '/'
 				remap += 1;
 			}
 			snprintf(name, arglen - (remap - arg) + 1, "%s", remap);
 			continue;
 		}
+
+		assert(strncmp(arg, "__", 2) != 0 && "Error: only __name and __ns are recognized special remaps starting with '__'.");
 
 		// else this is a normal remap  local/name:=/global/name
 		int local_len = (remap - 2) - arg;
@@ -160,22 +160,52 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	assert(name_len > 0 && "Error: name has invalid length");
 	assert((prefix_len > 0 || prefix_len == -1) && "Error: prefix_len is invalid");
 
-	// default to prefix if in_prefix is nullptr.
+	// Default ROSE_BASE is /rose/
 	char topic[512] = "/rose/";
-	if(!in_prefix) {
-		in_prefix = topic;
-		prefix_len = 6;
-	}
-	if(prefix_len == -1) {
-		prefix_len = strlen(in_prefix);
-	}
-	if(in_prefix[0] != '/') {
-		snprintf(topic + 6, prefix_len + 6 + 1, "%s", in_prefix);
-		in_prefix = topic;
-		prefix_len = prefix_len + 6;
+	char *rose_base = getenv("ROSE_BASE");
+	if(rose_base != NULL) {
+		// strip trailing/leading slash
+		size_t blen = strlen(rose_base);
+		if(rose_base[0] == '/') {
+			rose_base += 1;
+			blen -= 1;
+		}
+		if(blen && rose_base[blen - 1] == '/') {
+			blen -= 1;
+		}
+		rose_base[blen] = '\0';
+		assert(strchr(rose_base, '/') == NULL && "Error: ROSE_BASE should not contain '/'");
+		snprintf(topic, blen + 3, "/%s/", rose_base);
 	}
 
-	// default to strlen if provided len is -1.
+	if(!in_prefix) { // No prefix, use base.
+		in_prefix = topic;
+		prefix_len = strlen(topic);
+	} else { // Copy provided prefix after base
+
+		// Default to strlen if provided len is -1
+		if(prefix_len == -1) {
+
+			prefix_len = strlen(in_prefix);
+		}
+
+		// Trim beginning or ending '/'
+		if(in_prefix[0] == '/') {
+			in_prefix += 1;
+			prefix_len -= 1;
+		}
+		if(prefix_len && in_prefix[prefix_len - 1] == '/') {
+			prefix_len -= 1;
+		}
+
+		if(prefix_len > 0) {
+			snprintf(topic + strlen(topic), prefix_len + 2, "%s/", in_prefix);
+		}
+		in_prefix = topic;
+		prefix_len = strlen(topic);
+	}
+
+	// Default to strlen if provided len is -1.
 	if(name_len == -1) {
 		name_len = strlen(in_name);
 	}
@@ -186,11 +216,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	n->deallocator = deallocate;
 
 	// replace "/" after first char with "%" for valid shared memory name
-	for(int i = 0; i < name_len; i += 1) {
-		if(in_name[i] == '/') {
-			in_name[i] = '%';
-		}
-	}
+	assert(strchr(in_name, '/') == NULL && "Error: Node name should not contain '/'");
 	char *name = rose_alloc(n, name_len + 64);
 	memcpy(name, in_name, (size_t) name_len);
 	sprintf(name + name_len, "-%d", (int) getpid());
@@ -301,8 +327,8 @@ rose_publisher *rose_create_pub(rose_node *n,
 	if(n->pubs_length >= MAX_PUBSUB) {
 		return NULL;
 	}
-	for (u64 i = 1; i < strlen(topic); i+= 1){
-		if (topic[i] == '/') {
+	for(u64 i = 1; i < strlen(topic); i += 1) {
+		if(topic[i] == '/') {
 			topic[i] = '%';
 		}
 	}
@@ -335,8 +361,8 @@ rose_subscriber *rose_create_sub(rose_node *n,
 	} else {
 		snprintf(topic, sizeof(topic), "%s%.*s", n->prefix, (int) nlen, name);
 	}
-	for (u64 i = 1; i < strlen(topic); i += 1){
-		if (topic[i] == '/') {
+	for(u64 i = 1; i < strlen(topic); i += 1) {
+		if(topic[i] == '/') {
 			topic[i] = '%';
 		}
 	}
@@ -379,7 +405,7 @@ i64 rose_publish(rose_publisher *p, mirage_msg *msg) {
 	return quicksand_write(p->pub, msg->data, msg->cursor);
 }
 
-
+// NOT THREAD SAFE - do NOT read same subscriber concurrently across threads
 i64 rose_read(rose_subscriber *s, rosemsg *msg) {
 	if(!s || !msg) {
 		return ROSE_ERR_BADINPUT;
@@ -395,6 +421,7 @@ i64 rose_read(rose_subscriber *s, rosemsg *msg) {
 	return ROSE_NO_DATA; /* nothing to read */
 }
 
+// NOT THREAD SAFE - do NOT read same subscriber concurrently across threads
 i64 rose_readlast(rose_subscriber *s, rosemsg *msg) {
 	if(!s || !msg) {
 		return ROSE_ERR_BADINPUT;
@@ -414,14 +441,15 @@ u64 rose_remaining(rose_subscriber *s) {
 }
 
 
+// NOT THREAD SAFE - only call this from one thread at a time.
 void rose_spin_once(rose_node *n) {
 	if(!n) {
 		return;
 	}
 
-	static mirage_msg *m = NULL;
+	static _Thread_local mirage_msg *m = NULL;
 	if(!m) {
-		m = mirage_create(1920 * 1080 * 3, n->allocator);
+		m = mirage_create(MAX_MESSAGE_SIZE, n->allocator);
 		if(!m) {
 			return; // allocation failure
 		}
@@ -448,6 +476,7 @@ void rose_spin_once(rose_node *n) {
 	}
 }
 
+// NOT THREAD SAFE - only call this from one thread at a time.
 void rose_spin_forever(rose_node *node) {
 	while(1) {
 		rose_spin_once(node);
@@ -457,24 +486,21 @@ void rose_spin_forever(rose_node *node) {
 
 // -------------------------- Logging ------------------------------------------
 
-/* --------------------------------------------------------------------
- *  rose_log - print to console and publish a Mirage "Log" message.
- *
- *  The function maps the integer level to a console prefix and an
- *  integer error value that is sent as an f64 argument in the Mirage
- *  message.
- *
- *  Console output:
- *      INFO   -> stdout
- *      others -> stderr
- * ------------------------------------------------------------------*/
-void rose_log(rose_node *node,
-	      int level,
-	      const char *fmt,
-	      ...) {
-	/* ------------------------------------------------------------------
-     *  1.  Map the integer level to a string prefix.
-     * ------------------------------------------------------------------*/
+// --------------------------------------------------------------------
+//  rose_log - print to console and publish a Mirage "Log" message.
+//
+//  The function maps the integer level to a console prefix and an
+//  integer error value that is sent as an f64 argument in the Mirage
+//  message.
+//
+//  Console output:
+//      INFO   -> stdout
+//      others -> stderr
+// ------------------------------------------------------------------
+void rose_logv(rose_node *node, int level, const char *fmt, va_list ap) {
+	// ------------------------------------------------------------------
+	//  Map the integer level to a string prefix.
+	// --------------------------------------------------------------
 	const char *prefix;
 	switch(level) {
 	case 0: prefix = "[ROSE INFO] "; break;
@@ -483,29 +509,26 @@ void rose_log(rose_node *node,
 	case 3: prefix = "[ROSE FATAL] "; break;
 	default:
 		prefix = "[ROSE ERROR] ";
-		level = 2; /* treat unknown as ERROR */
+		level = 2; // treat unknown as ERROR
 		break;
 	}
 
-	/* ------------------------------------------------------------------
-     *  2.  Format the user message (max 1024 bytes).
-     * ------------------------------------------------------------------*/
+	// ------------------------------------------------------------------
+	//  Format the user message (max 1024 bytes).
+	// --------------------------------------------------------------
 	char user_msg[1024];
-	va_list ap;
-	va_start(ap, fmt);
 	int user_len = vsnprintf(user_msg, sizeof(user_msg), fmt, ap);
-	va_end(ap);
 	if(user_len < 0) {
-		return; /* formatting error */
+		return; // formatting error
 	}
-	if((size_t) user_len >= sizeof(user_msg)) {
+	if((size_t) user_len >= sizeof(user_msg)) { // truncate if needed
 		user_len = (int) sizeof(user_msg) - 1;
 	}
 	user_msg[user_len] = '\0';
 
-	/* ------------------------------------------------------------------
-     *  3.  Compose the console string.
-     * ------------------------------------------------------------------*/
+	// ------------------------------------------------------------------
+	//  Compose the console string.
+	// ----------------------------------------------------------------
 	char console_msg[1024];
 	int console_len = snprintf(console_msg, sizeof(console_msg),
 				   "%s%s", prefix, user_msg);
@@ -517,18 +540,18 @@ void rose_log(rose_node *node,
 	}
 	console_msg[console_len] = '\0';
 
-	/* ------------------------------------------------------------------
-     *  4.  Print to stdout (INFO) or stderr (others).
-     * ------------------------------------------------------------------*/
+	// ------------------------------------------------------------------
+	//  Print to stdout (INFO) or stderr (others).
+	// --------------------------------------------------------------
 	FILE *stream = (level == 0) ? stdout : stderr;
 	fputs(console_msg, stream);
 	fputc('\n', stream);
 	fflush(stream);
 
-	/* ------------------------------------------------------------------
-     *  5.  Build and publish a Mirage message.
-     * ------------------------------------------------------------------*/
-	static mirage_msg *m = NULL;
+	// -----------------------------------------------------------------
+	// Build and publish a Mirage message.
+	// -------------------------------------------------------------
+	static _Thread_local mirage_msg *m = NULL;
 	if(!m) {
 		m = mirage_create(1024, 0);
 		if(!m) {
@@ -538,53 +561,64 @@ void rose_log(rose_node *node,
 
 	int64_t err = 0;
 	err |= mirage_write_start(m); /* message start marker */
-	err |= mirage_write_fn(m, "Log", (int64_t) strlen("Log"), 2);
-	err |= mirage_write_f64(m, (f64) level); /* integer error level as f64 */
-	err |= mirage_write_string(m, user_msg,
+	err |= mirage_write_fn(m, "Log", (int64_t) strlen("Log"), 3);
+	err |= mirage_write_i64(m, (i64) level);
+	err |= mirage_write_string(m, node->name, node->name_length);
+	err |= mirage_write_string(m, user_msg, // TODO (Alec, 2025): truncate?
 				   (int64_t) strlen(user_msg));
 
 	if(err >= 0 && node && node->log_pub.pub) {
 		int64_t msg_len = m->cursor;
 		quicksand_write(node->log_pub.pub, m->data, msg_len);
+	} else {
+		fprintf(stderr, "Log message too big for roselog.\n");
 	}
 
 	mirage_destroy(&m, 0);
 }
 
+void rose_log(rose_node *node, int level, const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	rose_logv(node, level, fmt, ap);
+	va_end(ap);
+}
+
 void rose_info(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log(ROSE_STATIC_NODE, 0, fmt, ap);
+	rose_logv(ROSE_STATIC_NODE, 0, fmt, ap);
 	va_end(ap);
 }
 
 void rose_warn(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log(ROSE_STATIC_NODE, 1, fmt, ap);
+	rose_logv(ROSE_STATIC_NODE, 1, fmt, ap);
 	va_end(ap);
 }
 
 void rose_error(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log(ROSE_STATIC_NODE, 2, fmt, ap);
+	rose_logv(ROSE_STATIC_NODE, 2, fmt, ap);
 	va_end(ap);
 }
 
 void rose_fatal(const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
-	rose_log(ROSE_STATIC_NODE, 3, fmt, ap);
+	rose_logv(ROSE_STATIC_NODE, 3, fmt, ap);
 	va_end(ap);
 }
 
 
 // --------------------------Parameter handling --------------------------------
 
-/* ------------------------------------------------------------------
- *  rose_get_param - send a Request and wait (<=1 s) for the reply.
- * -----------------------------------------------------------------*/
+// ------------------------------------------------------------------
+//  rose_get_param - send a Request and wait (<=1 s) for the reply.
+//  NOT THREAD SAFE - only call it from one thread at a time.
+// -----------------------------------------------------------------*/
 i64 rose_get_param(rose_node *n,
 		   char *param_name, i64 param_name_length,
 		   mirage_msg *param) {
@@ -592,7 +626,7 @@ i64 rose_get_param(rose_node *n,
 		return ROSE_ERR_BADINPUT;
 	}
 
-	static mirage_msg *req = NULL;
+	static _Thread_local mirage_msg *req = NULL;
 
 	/* ---------- 1.  Build the node identifier string ---------- */
 	char node_id[512];
@@ -655,7 +689,7 @@ i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
 	}
 
 	/* Static buffer for the wrapped message */
-	static mirage_msg *m = NULL;
+	static _Thread_local mirage_msg *m = NULL;
 	if(!m) {
 		m = mirage_create(8192, 0);
 		if(!m) {
@@ -722,10 +756,10 @@ void rose_nanosleep(f64 nanoseconds) {
 
 /* Simple 1-step rate-maintaining sleep. */
 void rose_sleep_rate(f64 hz) {
-	static u64 last_ts = 0;
+	static _Thread_local u64 last_ts = 0;
 	const f64 period_ns = 1e9 / hz;
 
-	if(last_ts == 0) {
+	if(last_ts == 0) { // Sleep on first call
 		quicksand_sleep(period_ns);
 		last_ts = quicksand_now();
 		return;

@@ -17,7 +17,7 @@ static void cb(mirage_msg *msg) {
 		return;
 	}
 
-	printf("[Subscriber] got: '%.*s', %f\n", (int) str_len, str, val);
+	rose_info("got: '%.*s', %f\n", (int) str_len, str, val);
 }
 
 
@@ -28,17 +28,19 @@ int main(int argc, char **argv) {
 	printf("Node name: %s\n", node->name);
 
 	rose_publisher *pub = rose_create_pub(node,
-		"chatter", -1, // use strlen
-		1024,  // Message size
-		16); // Hz
+					      "chatter", // topic name
+					      -1,	 // use strlen
+					      1024,	 // Message size
+					      16);	 // Hz
 	if(!pub) {
 		return 1;
 	}
 
 	rose_subscriber *sub = rose_create_sub(node,
-		"chatter", -1, // use strlen
-		1,   // Latest only
-		cb); // Callback
+					       "chatter", // topic name
+					       -1,	  // use strlen
+					       1,	  // Latest only
+					       cb);	  // Callback
 	if(!sub) {
 		return 2;
 	}
@@ -47,7 +49,7 @@ int main(int argc, char **argv) {
 	while(rose_ok(node)) {
 		// Build + publish messsage
 		mirage_write_start(msg);
-		mirage_write_fn(msg, "List", -1, 2);  // List with 2 args
+		mirage_write_fn(msg, "List", -1, 2); // List with 2 args
 		mirage_write_string(msg, "Hello", -1);
 		mirage_write_f64(msg, rose_elapsed_seconds(start));
 		rose_publish(pub, msg);
@@ -55,10 +57,7 @@ int main(int argc, char **argv) {
 		// Check subscribers and run callbacks
 		rose_spin_once(node);
 
-		// Try to maintain 1 hz
-		rose_sleep_rate(1);
+		// Try to maintain 1 Hz
+		rose_sleep_rate(1.0);
 	}
-
-
-	rose_shutdown(node);
 }
