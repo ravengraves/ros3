@@ -64,6 +64,8 @@ struct rose_node {
 
 	void *(*allocator)(size_t);
 	void (*deallocator)(void *);
+
+	u64 last_heartbeat_ns; // Timestamp of last heartbeat sent (nanoseconds)
 };
 
 
@@ -75,6 +77,27 @@ typedef enum {
 	ROSE_ERR_BADINPUT = -8
 } ROSE_RES;
 
+// Registration message types
+#define ROSE_MSG_NODE_START "NodeStart"
+#define ROSE_MSG_PUB_REGISTER "PubRegister"
+#define ROSE_MSG_SUB_REGISTER "SubRegister"
+#define ROSE_MSG_HEARTBEAT "Heartbeat"
+
+// Query message types
+#define ROSE_MSG_DUMP_ALL "DumpAll"
+#define ROSE_MSG_LOOKUP_NAME "LookupName"
+#define ROSE_MSG_LOOKUP_PID "LookupPid"
+#define ROSE_MSG_NODE_INFO "NodeInfo"
+#define ROSE_MSG_DONE "Done"
+
+// Query topic suffixes (appended to ROSE_BASE)
+#define ROSE_TOPIC_DUMP "rosemaster_dump"
+#define ROSE_TOPIC_LOOKUP "rosemaster_lookup"
+
+// Query sizing constants
+#define ROSE_QUERY_MSG_SIZE 33024 // (64+64)*256 + 256
+#define ROSE_DUMP_RING_SIZE 8192  // 2048*4 messages
+#define ROSE_LOOKUP_RING_SIZE 256 // fewer expected
 
 /// ---------------- Initialization---------------------------------------------
 
@@ -155,5 +178,13 @@ void rose_sleep(f64 seconds);
 void rose_nanosleep(f64 nanoseconds);
 
 void rose_sleep_rate(f64 hz);
+
+/// ---------------- Topic Naming ----------------------------------------------
+
+// Convert topic name to shared memory name with ROSE_BASE prefix.
+// Result format: /<ROSE_BASE>/<topic> with '/' converted to '%' after first char.
+// If topic starts with '/', it's treated as absolute (prefix stripped).
+// Returns pointer to shm buffer for convenience.
+char *rose_topic_to_shm(char *shm, size_t shm_size, const char *topic);
 
 #endif // ROS3_H

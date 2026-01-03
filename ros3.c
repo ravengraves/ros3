@@ -17,6 +17,67 @@
 
 static rose_node *ROSE_STATIC_NODE = NULL;
 
+// Send a registration message to rosemaster
+// msg_type: ROSE_MSG_NODE_START, ROSE_MSG_PUB_REGISTER, ROSE_MSG_SUB_REGISTER, ROSE_MSG_HEARTBEAT
+// For NodeStart/Heartbeat: arg2 is NULL, pid is sent as i64
+// For PubRegister/SubRegister: arg2 is the topic name
+static void _rose_send_registration(rose_node *n, char *msg_type,
+				    char *arg2, i64 arg2_len) {
+	if(!n || !n->rosemaster_pub.pub) {
+		return;
+	}
+
+	static _Thread_local mirage_msg *m = NULL;
+	if(!m) {
+		m = mirage_create(512, NULL);
+		if(!m) {
+			return;
+		}
+	}
+
+	int64_t err = 0;
+	err |= mirage_write_start(m);
+
+	if(strcmp(msg_type, ROSE_MSG_NODE_START) == 0) {
+		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 2);
+		err |= mirage_write_string(m, n->name, n->name_length);
+		err |= mirage_write_i64(m, (i64) getpid());
+	} else if(strcmp(msg_type, ROSE_MSG_HEARTBEAT) == 0) {
+		i64 now = (i64) quicksand_now();
+		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 3);
+		err |= mirage_write_string(m, n->name, n->name_length);
+		err |= mirage_write_i64(m, (i64) getpid());
+		err |= mirage_write_i64(m, now);
+	} else {
+		// PubRegister or SubRegister
+		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 2);
+		err |= mirage_write_string(m, n->name, n->name_length);
+		err |= mirage_write_string(m, arg2, arg2_len);
+	}
+
+	if(err >= 0) {
+		quicksand_write(n->rosemaster_pub.pub, m->data, m->cursor);
+	}
+}
+
+// Send rate-limited heartbeat (max 1kHz)
+static void _rose_send_heartbeat(rose_node *n) {
+	if(!n || !n->rosemaster_pub.pub) {
+		return;
+	}
+
+	u64 now = quicksand_now();
+	f64 elapsed = quicksand_ns(now, n->last_heartbeat_ns);
+
+	// Rate limit: 1ms minimum interval (1kHz max)
+	if(n->last_heartbeat_ns != 0 && elapsed < 1e6) {
+		return;
+	}
+
+	_rose_send_registration(n, ROSE_MSG_HEARTBEAT, NULL, 0);
+	n->last_heartbeat_ns = now;
+}
+
 static void *rose_alloc(rose_node *node, size_t size) {
 	if(node && node->allocator) {
 		return node->allocator(size);
@@ -286,11 +347,20 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 
 	ROSE_STATIC_NODE = n;
 
+	// Initialize heartbeat timestamp
+	n->last_heartbeat_ns = 0;
+
+	// Send NodeStart registration to rosemaster
+	_rose_send_registration(n, ROSE_MSG_NODE_START, NULL, 0);
+
 	return n;
 }
 
 i64 rose_ok(rose_node *n) {
-	// for now, error if any control messages received.
+	if(!n) {
+		return 0;
+	}
+	_rose_send_heartbeat(n);
 	return rose_remaining(&n->control_sub) == 0;
 }
 
@@ -345,6 +415,10 @@ rose_publisher *rose_create_pub(rose_node *n,
 	}
 
 	n->pubs_length += 1;
+
+	// Send PubRegister to rosemaster
+	_rose_send_registration(n, ROSE_MSG_PUB_REGISTER, topic, strlen(topic));
+
 	return pub;
 }
 
@@ -382,6 +456,10 @@ rose_subscriber *rose_create_sub(rose_node *n,
 	}
 
 	n->subs_length += 1;
+
+	// Send SubRegister to rosemaster
+	_rose_send_registration(n, ROSE_MSG_SUB_REGISTER, topic, strlen(topic));
+
 	return sub;
 }
 
@@ -716,6 +794,42 @@ i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
 
 	/* Send the wrapped message */
 	return quicksand_write(n->param_pub.pub, m->data, (int64_t) m->cursor);
+}
+
+// ------------------------- Topic Naming --------------------------------------
+
+char *rose_topic_to_shm(char *shm, size_t shm_size, const char *topic) {
+	// Build base from ROSE_BASE env var (default: "/rose/")
+	char base[512] = "/rose/";
+	char *rose_base = getenv("ROSE_BASE");
+	if(rose_base != NULL) {
+		size_t blen = strlen(rose_base);
+		if(rose_base[0] == '/') {
+			rose_base += 1;
+			blen -= 1;
+		}
+		if(blen && rose_base[blen - 1] == '/') {
+			blen -= 1;
+		}
+		snprintf(base, blen + 3, "/%.*s/", (int) blen, rose_base);
+	}
+
+	// Skip leading / on topic if present
+	if(topic[0] == '/') {
+		topic++;
+	}
+
+	// Build full path: /<ROSE_BASE>/<topic>
+	snprintf(shm, shm_size, "%s%s", base, topic);
+
+	// Convert / to % after first char
+	for(size_t i = 1; shm[i]; i++) {
+		if(shm[i] == '/') {
+			shm[i] = '%';
+		}
+	}
+
+	return shm;
 }
 
 // ------------------------- Timing Utilities ----------------------------------
