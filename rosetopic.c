@@ -34,6 +34,31 @@ static void print_usage(void) {
 	fprintf(stderr, "  ROSE_BASE  Namespace (default: 'rose')\n");
 }
 
+// Convert shm topic name to display format: start from first %, replace % with /
+static void topic_to_display(char *out, size_t out_size, const char *shm_name) {
+	// Skip to first %
+	while(*shm_name && *shm_name != '%') {
+		shm_name++;
+	}
+	// Copy from first %, replacing % with /
+	size_t i = 0;
+	while(*shm_name && i < out_size - 1) {
+		out[i++] = (*shm_name == '%') ? '/' : *shm_name;
+		shm_name++;
+	}
+	out[i] = '\0';
+}
+
+// Convert user input to shm format: replace / with % (but leave existing % alone)
+static void input_to_shm(char *out, size_t out_size, const char *input) {
+	size_t i = 0;
+	while(*input && i < out_size - 1) {
+		out[i++] = (*input == '/') ? '%' : *input;
+		input++;
+	}
+	out[i] = '\0';
+}
+
 // Build query topic name using rose_topic_to_shm helper
 static void build_topic_name(char *buf, size_t buf_size, const char *suffix) {
 	char topic[256];
@@ -207,10 +232,12 @@ static void read_and_print_topics(quicksand_connection *conn) {
 		}
 	}
 
-	// Sort and print
+	// Sort and print with display formatting
 	qsort(topics, (size_t) topic_count, sizeof(topics[0]), topic_cmp);
 	for(int i = 0; i < topic_count; i++) {
-		printf("%s\n", topics[i]);
+		char display[256];
+		topic_to_display(display, sizeof(display), topics[i]);
+		printf("%s\n", display);
 	}
 
 	mirage_destroy(&msg, NULL);
@@ -274,7 +301,9 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 		}
 	}
 
-	printf("Topic: %s\n\n", topic_filter);
+	char display[256];
+	topic_to_display(display, sizeof(display), topic_filter);
+	printf("Topic: %s\n\n", display);
 	printf("Publishers:\n");
 	if(pub_count == 0) {
 		printf("  (none)\n");
@@ -428,9 +457,13 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
+		// Convert user input: / -> %
+		char topic_filter[256];
+		input_to_shm(topic_filter, sizeof(topic_filter), argv[2]);
+
 		skip_to_latest(conn);
 		send_dump_request(conn);
-		read_and_print_topic_info(conn, argv[2]);
+		read_and_print_topic_info(conn, topic_filter);
 
 	} else if(strcmp(cmd, "echo") == 0) {
 		if(argc < 3) {

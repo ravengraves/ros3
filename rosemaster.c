@@ -498,6 +498,13 @@ int main(int argc, char **argv) {
 	master_start_time = quicksand_now();
 	u64 last_status_print = master_start_time;
 
+	i64 sz = msg->max_length;
+	// quicksand_read_latest(pub, msg->data, &sz); // skip - read historical node data (TODO Alec, 2026: use timestamps to filter old)
+	sz = query_msg->max_length;
+	quicksand_read_latest(dump_conn, query_msg->data, &sz);
+	sz = query_msg->max_length;
+	quicksand_read_latest(lookup_conn, query_msg->data, &sz);
+
 	while(running) {
 		// Read all registration messages
 		i64 sz = msg->max_length;
@@ -537,7 +544,7 @@ int main(int argc, char **argv) {
 	}
 
 	printf("[rosemaster] Shutting down...\n");
-	mirage_destroy(&msg, NULL);
+	// mirage_destroy(&msg, NULL);
 
 	return 0;
 }
