@@ -434,6 +434,10 @@ int main(int argc, char **argv) {
 	(void) argc;
 	(void) argv;
 
+	if(rose_set_pdeathsig(SIGTERM) != 0) {
+		perror("[rosemaster] prctl(PR_SET_PDEATHSIG)");
+	}
+
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 

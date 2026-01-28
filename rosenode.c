@@ -11,6 +11,7 @@
 
 #include "ros3.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -306,6 +307,10 @@ int main(int argc, char **argv) {
 	if(argc < 2) {
 		print_usage();
 		return 1;
+	}
+
+	if(rose_set_pdeathsig(SIGTERM) != 0) {
+		perror("[rosenode] prctl(PR_SET_PDEATHSIG)");
 	}
 
 	const char *cmd = argv[1];

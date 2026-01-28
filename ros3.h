@@ -187,4 +187,7 @@ void rose_sleep_rate(f64 hz);
 // Returns pointer to shm buffer for convenience.
 char *rose_topic_to_shm(char *shm, size_t shm_size, const char *topic);
 
+// Ensure this process receives SIGTERM if its parent exits.
+int rose_set_pdeathsig(int sig);
+
 #endif // ROS3_H

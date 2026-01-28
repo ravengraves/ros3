@@ -1,12 +1,20 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "ros3.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <signal.h>
 #include <stdarg.h>   /* vaargs */
 #include <stdio.h>    /* snprintf */
 #include <stdlib.h>   /* malloc, free */
 #include <string.h>   /* strlen, strcpy, memcpy */
 #include <sys/types.h>/* pid_t */
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #include <unistd.h>   /* getpid */
 
 
@@ -85,17 +93,42 @@ static void *rose_alloc(rose_node *node, size_t size) {
 	return malloc(size);
 }
 
-// static void rose_dealloc(rose_node *node, void **ptr) {
-// 	if(!ptr || !(*ptr)) {
-// 		return;
-// 	}
-// 	if(node && node->deallocator) {
-// 		node->deallocator(ptr);
-// 	} else {
-// 		free(ptr);
-// 	}
-// 	*ptr = 0;
-// }
+static void rose_free(rose_node *node, void *ptr) {
+	if(!ptr) {
+		return;
+	}
+	if(node && node->deallocator) {
+		node->deallocator(ptr);
+	} else {
+		free(ptr);
+	}
+}
+
+// Advance a subscriber to the latest slot to avoid stale reads on startup.
+static void rose_subscriber_sync_latest(rose_subscriber *sub) {
+	if(!sub || !sub->sub || !sub->sub->buffer) {
+		return;
+	}
+
+	quicksand_connection *conn = sub->sub;
+	u64 buffer_size = conn->buffer->message_size;
+	if(buffer_size == 0) {
+		conn->read_index = conn->buffer->index;
+		conn->read_stamp = quicksand_now();
+		return;
+	}
+
+	u8 *scratch = rose_alloc(sub->node, (size_t) buffer_size);
+	if(!scratch) {
+		conn->read_index = conn->buffer->index;
+		conn->read_stamp = quicksand_now();
+		return;
+	}
+
+	i64 sz = (i64) buffer_size;
+	quicksand_read_latest(conn, scratch, &sz);
+	rose_free(sub->node, scratch);
+}
 
 void _rose_shutdown(void) {
 	rose_shutdown(ROSE_STATIC_NODE);
@@ -107,6 +140,16 @@ void _rose_signal_shutdown(int sig) {
 	// exit(0);
 }
 
+int rose_set_pdeathsig(int sig) {
+#if defined(__linux__)
+	return prctl(PR_SET_PDEATHSIG, (long) sig);
+#else
+	(void) sig;
+	errno = ENOSYS;
+	return -1;
+#endif
+}
+
 rose_node *rose_init(char argc, char **argv, char *name_in,
 		     void *(*alloc)(size_t), void (*dealloc)(void *)) {
 	void *(*allocate)(size_t) = malloc;
@@ -116,6 +159,11 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 	void (*deallocate)(void *) = free;
 	if(dealloc) {
 		deallocate = (void (*)(void *)) dealloc;
+	}
+
+	if(rose_set_pdeathsig(SIGTERM) != 0) {
+		fprintf(stderr, "rose_init: failed to set parent death signal: %s\n",
+			strerror(errno));
 	}
 
 	char *remaps = allocate(REMAP_SIZE);
@@ -273,6 +321,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	assert(name_len < 255 && "Name is too long");
 
 	rose_node *n = allocate(sizeof(rose_node));
+	memset(n, 0, sizeof(rose_node));  // Zero out to ensure all pointers are NULL
 	n->allocator = allocate;
 	n->deallocator = deallocate;
 
@@ -301,8 +350,10 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	n->remap_count = remap_count;
 
 	n->pubs = allocate(sizeof(rose_publisher) * MAX_PUBSUB);
+	memset(n->pubs, 0, sizeof(rose_publisher) * MAX_PUBSUB);
 	n->pubs_length = 0;
 	n->subs = allocate(sizeof(rose_subscriber) * MAX_PUBSUB);
+	memset(n->subs, 0, sizeof(rose_subscriber) * MAX_PUBSUB);
 	n->subs_length = 0;
 
 	// find where base prefix ends (default "/rose/")
@@ -338,12 +389,14 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	assert(res == 0 && "Error: could not map node params ring.");
 	n->param_sub.node = n;
 	n->param_sub.callback = NULL;
+	rose_subscriber_sync_latest(&n->param_sub);
 
 	sprintf(topic + base_prefix_len + n->name_length + 1, "%s", "control");
 	res = quicksand_connect(&n->control_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
 	assert(res == 0 && "Error: could not map node control ring.");
 	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
+	rose_subscriber_sync_latest(&n->control_sub);
 
 	ROSE_STATIC_NODE = n;
 
@@ -385,6 +438,9 @@ rose_publisher *rose_create_pub(rose_node *n,
 				char *name, i64 name_length,
 				u64 message_length, u64 message_hz) {
 	assert(n && "Error: node is NULL");
+	if(message_length == 0 || message_hz == 0) {
+		return NULL;
+	}
 	size_t nlen = (name_length == -1) ? strlen(name) : (size_t) name_length;
 
 	/* Build the fully-qualified topic name. */
@@ -455,6 +511,8 @@ rose_subscriber *rose_create_sub(rose_node *n,
 		return NULL;
 	}
 
+	rose_subscriber_sync_latest(sub);
+
 	n->subs_length += 1;
 
 	// Send SubRegister to rosemaster
@@ -492,7 +550,6 @@ i64 rose_read(rose_subscriber *s, rosemsg *msg) {
 	int64_t sz = msg->max_length;
 	int64_t ret = quicksand_read(s->sub, msg->data, &sz);
 	if(ret >= 0) {
-		printf("size is %d\n", (int) sz);
 		msg->length = (u64) sz;
 		return ret; /* number of msgs remaining */
 	}
