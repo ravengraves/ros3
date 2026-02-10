@@ -30,11 +30,15 @@ rm -f "/dev/shm/${ROSE_BASE}%"* 2>/dev/null || true
 # Launch rosemaster and test node (all use same ROSE_BASE)
 "$BUILD_DIR/rosemaster" >/dev/null 2>&1 &
 MASTER_PID=$!
+
+# Let rosemaster create its core topics before the test node starts.
+sleep 0.6
+
 "$BUILD_DIR/test" >/dev/null 2>&1 &
 TEST_PID=$!
 
-# Brief wait for registration
-sleep 0.2
+# Give rosemaster/node time to register topics before querying.
+sleep 0.6
 
 # Run all queries
 NODE_OUTPUT=$("$BUILD_DIR/rosenode" list 2>&1)

@@ -363,37 +363,48 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	}
 	base_prefix_len += 1;
 
-	// map connections
+	// map connections (retry with 1ms sleep until connected)
 	i64 res = 0;
 	memcpy(topic, prefix, base_prefix_len); // base_prefix
+
 	sprintf(topic + base_prefix_len, "%s", "rosemaster");
-	res = quicksand_connect(&n->rosemaster_pub.pub, topic, -1, 512, 8192, 0);
-	assert(res == 0 && "Error: could not map rosemaster ring.");
+	for(res = -1; res != 0;) {
+		res = quicksand_connect(&n->rosemaster_pub.pub, topic, -1, 512, 8192, 0);
+		if(res != 0) rose_sleep(1e-3);
+	}
 	n->rosemaster_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
-	res = quicksand_connect(&n->log_pub.pub, topic, -1, 1024, 8192, (void *) allocate);
-	assert(res == 0 && "Error: could not map roselog ring.");
+	for(res = -1; res != 0;) {
+		res = quicksand_connect(&n->log_pub.pub, topic, -1, 1024, 8192, (void *) allocate);
+		if(res != 0) rose_sleep(1e-3);
+	}
 	n->log_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "param_query");
-	res = quicksand_connect(&n->param_pub.pub, topic, -1, 512, 8192, (void *) allocate);
-	assert(res == 0 && "Error: could not map param_query ring.");
+	for(res = -1; res != 0;) {
+		res = quicksand_connect(&n->param_pub.pub, topic, -1, 512, 8192, (void *) allocate);
+		if(res != 0) rose_sleep(1e-3);
+	}
 	n->param_pub.node = n;
 
 	// full prefix
 	memcpy(topic, prefix, prefix_len + 1);
 	snprintf(topic + prefix_len, n->name_length + 2, "%s%%", n->name);
 	sprintf(topic + base_prefix_len + n->name_length + 1, "%s", "params");
-	res = quicksand_connect(&n->param_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
-	assert(res == 0 && "Error: could not map node params ring.");
+	for(res = -1; res != 0;) {
+		res = quicksand_connect(&n->param_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
+		if(res != 0) rose_sleep(1e-3);
+	}
 	n->param_sub.node = n;
 	n->param_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->param_sub);
 
 	sprintf(topic + base_prefix_len + n->name_length + 1, "%s", "control");
-	res = quicksand_connect(&n->control_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
-	assert(res == 0 && "Error: could not map node control ring.");
+	for(res = -1; res != 0;) {
+		res = quicksand_connect(&n->control_sub.sub, topic, -1, 1024, 1024, (void *) allocate);
+		if(res != 0) rose_sleep(1e-3);
+	}
 	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->control_sub);

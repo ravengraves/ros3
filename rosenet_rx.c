@@ -1,49 +1,121 @@
 // rosenet_rx.c - Network receiver: listens on port, publishes to local topic
 //
 // Usage: rosenet_rx <topic> <port> <msg_size> <ring_slots> [--udp]
+//        rosenet_rx --topic T --port P [--udp] [--message_size N] [--queue_depth D]
 
 #include "ros3.h"
 
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
+// --- CLI helpers -------------------------------------------------------------
+
+static const char *find_arg(int argc, char **argv, const char *name, const char *fallback) {
+	for(int i = 1; i + 1 < argc; ++i) {
+		if(strcmp(argv[i], name) == 0) return argv[i + 1];
+	}
+	return fallback;
+}
+
+static int has_flag(int argc, char **argv, const char *flag) {
+	for(int i = 1; i < argc; ++i) {
+		if(strcmp(argv[i], flag) == 0) return 1;
+	}
+	return 0;
+}
+
+static i64 find_arg_i64(int argc, char **argv, const char *name, i64 fallback) {
+	const char *s = find_arg(argc, argv, name, NULL);
+	if(!s) return fallback;
+	return atoll(s);
+}
+
+// --- Network helpers ---------------------------------------------------------
+
 // Read exactly n bytes from socket
-static ssize_t recv_exact(int sock, void *buf, size_t n) {
-	uint8_t *p = buf;
-	size_t total = 0;
+static ssize_t recv_exact(int sock, void *buf, u64 n) {
+	u8 *p = (u8 *) buf;
+	u64 total = 0;
 	while(total < n) {
 		ssize_t r = recv(sock, p + total, n - total, 0);
-		if(r <= 0) {
-			return r;
-		}
-		total += (size_t) r;
+		if(r <= 0) return r;
+		total += (u64) r;
 	}
 	return (ssize_t) total;
 }
 
+// --- Main --------------------------------------------------------------------
+
 int main(int argc, char **argv) {
-	if(argc < 5) {
+	// Named args take priority over positional
+	const char *topic = find_arg(argc, argv, "--topic", NULL);
+	i64 port = find_arg_i64(argc, argv, "--port", -1);
+	int use_udp = has_flag(argc, argv, "--udp");
+	i64 message_size = find_arg_i64(argc, argv, "--message_size", 0);
+	i64 queue_depth = find_arg_i64(argc, argv, "--queue_depth", 0);
+
+	// Fall back to positional: <topic> <port> <msg_size> <slots> [--udp]
+	i64 pos_msg_size = 0;
+	i64 pos_slots = 0;
+	if(!topic && argc >= 2 && argv[1][0] != '-') topic = argv[1];
+	if(port < 0 && argc >= 3 && argv[2][0] != '-') port = atoi(argv[2]);
+	if(argc >= 4 && argv[3][0] != '-') pos_msg_size = atoi(argv[3]);
+	if(argc >= 5 && argv[4][0] != '-') pos_slots = atoi(argv[4]);
+	if(!use_udp && argc > 5 && strcmp(argv[5], "--udp") == 0) use_udp = 1;
+
+	if(!topic || port < 0) {
 		fprintf(stderr, "Usage: %s <topic> <port> <msg_size> <slots> [--udp]\n", argv[0]);
+		fprintf(stderr, "       %s --topic T --port P [--udp] [--message_size N] [--queue_depth D]\n", argv[0]);
 		return 1;
 	}
 
-	const char *topic = argv[1];
-	int port = atoi(argv[2]);
-	int msg_size = atoi(argv[3]);
-	int slots = atoi(argv[4]);
-	int use_udp = (argc > 5 && strcmp(argv[5], "--udp") == 0);
+	// Compute buffer size and queue depth
+	i64 buf_size;
+	i64 slots;
+
+	if(message_size > 0) {
+		// Benchmark mode: generous formula from benchmark_common.h
+		i64 fixed_bytes = 48; // 6 * sizeof(u64)
+		i64 payload_words = (message_size > fixed_bytes)
+		    ? (message_size - fixed_bytes + 7) / 8
+		    : 0;
+		buf_size = (7 + payload_words) * 16 + 64;
+		if(buf_size < 4 * 1024 * 1024) buf_size = 4 * 1024 * 1024;
+
+		if(queue_depth > 0) {
+			slots = queue_depth;
+		} else {
+			// Auto-compute: target 512 MB total ring buffer
+			u64 padded = (16 + (u64) buf_size + 63) & ~(u64) 63;
+			slots = (i64) ((512ULL * 1024 * 1024) / padded);
+			if(slots < 2) slots = 2;
+		}
+	} else if(pos_msg_size > 0) {
+		// Positional fallback
+		buf_size = pos_msg_size;
+		slots = pos_slots > 0 ? pos_slots : 1024;
+	} else {
+		buf_size = 65536;
+		slots = 1024;
+	}
 
 	// Init as rose node
 	rose_node *node = rose_init(argc, argv, "rosenet_rx", NULL, NULL);
 
-	// Create publisher for destination topic
-	rose_publisher *pub = rose_create_pub(node, (char *) topic, -1, msg_size, slots);
+	// Create publisher with retry
+	rose_publisher *pub = NULL;
+	for(int i = 0; i < 5000 && !pub; ++i) {
+		pub = rose_create_pub(node, (char *) topic, -1, (u64) buf_size, (u64) slots);
+		if(!pub) rose_sleep(1e-3);
+	}
 	if(!pub) {
-		fprintf(stderr, "Failed to create topic %s\n", topic);
+		fprintf(stderr, "rosenet_rx: failed to create topic %s\n", topic);
 		return 1;
 	}
 
@@ -59,7 +131,7 @@ int main(int argc, char **argv) {
 
 	struct sockaddr_in addr = {0};
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons((uint16_t) port);
+	addr.sin_port = htons((u16) port);
 	addr.sin_addr.s_addr = INADDR_ANY;
 
 	if(bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
@@ -70,52 +142,51 @@ int main(int argc, char **argv) {
 	int client = sock;
 	if(!use_udp) {
 		listen(sock, 1);
-		rose_info("Waiting for TCP on port %d...", port);
+		rose_info("Waiting for TCP on port %lld...", (long long) port);
 		client = accept(sock, NULL, NULL);
 		if(client < 0) {
 			perror("accept");
 			return 1;
 		}
-		rose_info("Connected");
+		// Disable Nagle for low latency
+		int flag = 1;
+		setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+		close(sock); // done with listen socket
+		rose_info("Connected on port %lld", (long long) port);
 	} else {
-		rose_info("Listening for UDP on port %d", port);
+		rose_info("Listening for UDP on port %lld", (long long) port);
+		// Short recv timeout for clean shutdown
+		struct timeval tv = {0};
+		tv.tv_usec = 1000; // 1ms
+		setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 	}
 
 	// Main loop
-	mirage_msg *msg = mirage_create(msg_size, NULL);
+	mirage_msg *msg = mirage_create(buf_size, NULL);
 	u64 count = 0;
 
 	while(rose_ok(node)) {
 		ssize_t n;
 		if(use_udp) {
-			n = recvfrom(client, msg->data, msg_size, 0, NULL, NULL);
+			n = recvfrom(client, msg->data, (size_t) buf_size, 0, NULL, NULL);
 		} else {
-			uint32_t len;
-			if(recv_exact(client, &len, 4) != 4) {
-				break;
-			}
-			len = ntohl(len);
-			if(len > (uint32_t) msg_size) {
-				continue;
-			}
+			u32 len;
+			if(recv_exact(client, &len, 4) != 4) break;
+			if(len == 0 || len > (u32) buf_size) break;
 			n = recv_exact(client, msg->data, len);
-			if(n != (ssize_t) len) {
-				break;
-			}
+			if(n != (ssize_t) len) break;
 		}
 
 		if(n > 0) {
+			msg->length = n;
 			msg->cursor = n;
 			rose_publish(pub, msg);
-			if(++count % 1000 == 0) {
+			if(++count % 10000 == 0) {
 				rose_info("Received %lu messages", (unsigned long) count);
 			}
 		}
 	}
 
 	close(client);
-	if(!use_udp) {
-		close(sock);
-	}
 	return 0;
 }

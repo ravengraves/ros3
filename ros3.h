@@ -2,9 +2,19 @@
 #define ROS3_H
 
 #include <mirage.h>
+
+#ifdef __cplusplus
+// quicksand.h is C11-only (_Atomic), so C++ consumers use an opaque pointer.
+typedef struct quicksand_connection quicksand_connection;
+#else
 #include <quicksand.h>
+#endif
 
 #include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef int64_t i64;
 typedef int32_t i32;
@@ -189,5 +199,9 @@ char *rose_topic_to_shm(char *shm, size_t shm_size, const char *topic);
 
 // Ensure this process receives SIGTERM if its parent exits.
 int rose_set_pdeathsig(int sig);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // ROS3_H
