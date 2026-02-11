@@ -7,10 +7,12 @@
 
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 // --- CLI helpers -------------------------------------------------------------
@@ -37,14 +39,27 @@ static i64 find_arg_i64(int argc, char **argv, const char *name, i64 fallback) {
 
 // --- Network helpers ---------------------------------------------------------
 
-// Send exactly len bytes (handles partial writes).
-static int send_all(int fd, const void *buf, u64 len) {
-	const u8 *p = (const u8 *) buf;
-	while(len > 0) {
-		ssize_t n = send(fd, p, len, MSG_NOSIGNAL);
+// Send length-prefixed frame [4-byte LE u32 header][payload] via scatter-gather I/O.
+// Single writev() syscall for header+payload instead of two separate send() calls.
+static int send_frame(int fd, const void *data, u32 len) {
+	struct iovec iov[2] = {
+	    {.iov_base = &len, .iov_len = 4},
+	    {.iov_base = (void *) data, .iov_len = len},
+	};
+	struct iovec *v = iov;
+	int cnt = 2;
+	while(cnt > 0) {
+		ssize_t n = writev(fd, v, cnt);
 		if(n <= 0) return -1;
-		p += n;
-		len -= (u64) n;
+		while(cnt > 0 && (size_t) n >= v[0].iov_len) {
+			n -= (ssize_t) v[0].iov_len;
+			++v;
+			--cnt;
+		}
+		if(cnt > 0 && n > 0) {
+			v[0].iov_base = (u8 *) v[0].iov_base + n;
+			v[0].iov_len -= (size_t) n;
+		}
 	}
 	return 0;
 }
@@ -52,6 +67,8 @@ static int send_all(int fd, const void *buf, u64 len) {
 // --- Main --------------------------------------------------------------------
 
 int main(int argc, char **argv) {
+	signal(SIGPIPE, SIG_IGN);
+
 	// Named args take priority over positional
 	const char *topic = find_arg(argc, argv, "--topic", NULL);
 	const char *host = find_arg(argc, argv, "--host", NULL);
@@ -123,7 +140,6 @@ int main(int argc, char **argv) {
 			sock = socket(AF_INET, SOCK_STREAM, 0);
 		}
 		if(!rose_ok(node)) return 1;
-		// Disable Nagle for low latency
 		int flag = 1;
 		setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 		rose_info("Connected to %s:%lld", host, (long long) port);
@@ -145,11 +161,9 @@ int main(int argc, char **argv) {
 				sendto(sock, msg->data, (size_t) msg->length, 0,
 				       (struct sockaddr *) &addr, sizeof(addr));
 			} else {
-				// Length-prefixed frame: [4 bytes LE uint32][payload]
 				u32 len = (u32) msg->length;
 				if(len == 0) continue;
-				if(send_all(sock, &len, sizeof(len)) < 0) break;
-				if(send_all(sock, msg->data, len) < 0) break;
+				if(send_frame(sock, msg->data, len) < 0) break;
 			}
 			if(++count % 10000 == 0) {
 				rose_info("Sent %lu messages", (unsigned long) count);
@@ -158,7 +172,7 @@ int main(int argc, char **argv) {
 			u64 now = rose_now();
 			if(!idle_start) {
 				idle_start = now;
-			} else if(rose_nanoseconds(now, idle_start) > 1e6) {
+			} else if(rose_nanoseconds(now, idle_start) > 1000000ULL) {
 				rose_sleep(1e-3);
 			}
 		}

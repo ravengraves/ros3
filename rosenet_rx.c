@@ -6,12 +6,13 @@
 #include "ros3.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 // --- CLI helpers -------------------------------------------------------------
@@ -38,7 +39,7 @@ static i64 find_arg_i64(int argc, char **argv, const char *name, i64 fallback) {
 
 // --- Network helpers ---------------------------------------------------------
 
-// Read exactly n bytes from socket
+// Read exactly n bytes from socket (blocking).
 static ssize_t recv_exact(int sock, void *buf, u64 n) {
 	u8 *p = (u8 *) buf;
 	u64 total = 0;
@@ -148,38 +149,51 @@ int main(int argc, char **argv) {
 			perror("accept");
 			return 1;
 		}
-		// Disable Nagle for low latency
 		int flag = 1;
 		setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-		close(sock); // done with listen socket
+		close(sock);
 		rose_info("Connected on port %lld", (long long) port);
 	} else {
 		rose_info("Listening for UDP on port %lld", (long long) port);
-		// Short recv timeout for clean shutdown
-		struct timeval tv = {0};
-		tv.tv_usec = 1000; // 1ms
-		setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 	}
 
-	// Main loop
+	// Main loop: try non-blocking recv first, fall back to poll on EAGAIN
 	mirage_msg *msg = mirage_create(buf_size, NULL);
 	u64 count = 0;
+	struct pollfd pfd = {.fd = client, .events = POLLIN};
 
 	while(rose_ok(node)) {
 		ssize_t n;
 		if(use_udp) {
-			n = recvfrom(client, msg->data, (size_t) buf_size, 0, NULL, NULL);
+			n = recvfrom(client, msg->data, (size_t) buf_size, MSG_DONTWAIT, NULL, NULL);
+			if(n < 0) {
+				if(errno != EAGAIN && errno != EWOULDBLOCK) break;
+				if(poll(&pfd, 1, 10) <= 0) continue;
+				if(pfd.revents & (POLLERR | POLLHUP)) break;
+				continue;
+			}
 		} else {
+			// Non-blocking probe for frame header
 			u32 len;
-			if(recv_exact(client, &len, 4) != 4) break;
+			ssize_t hr = recv(client, &len, 4, MSG_DONTWAIT);
+			if(hr < 0) {
+				if(errno != EAGAIN && errno != EWOULDBLOCK) break;
+				if(poll(&pfd, 1, 10) <= 0) continue;
+				if(pfd.revents & (POLLERR | POLLHUP)) break;
+				continue;
+			}
+			if(hr == 0) break;
+			// Complete partial header if needed (blocking)
+			if(hr < 4 && recv_exact(client, (u8 *) &len + hr, (u64) (4 - hr)) != (ssize_t) (4 - hr))
+				break;
 			if(len == 0 || len > (u32) buf_size) break;
+			// Read payload (blocking — committed once we have the header)
 			n = recv_exact(client, msg->data, len);
 			if(n != (ssize_t) len) break;
 		}
 
 		if(n > 0) {
 			msg->length = n;
-			msg->cursor = n;
 			rose_publish(pub, msg);
 			if(++count % 10000 == 0) {
 				rose_info("Received %lu messages", (unsigned long) count);
