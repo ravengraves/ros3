@@ -41,7 +41,7 @@ ifeq ($(ARCH),aarch64)
 	CFLAGS_SO += -march=armv8-a
 endif
 
-all: build/libros3.so build/libros3.a
+all: build/libros3.so build/libros3.a build/libros3_gcc_lto.a
 
 # Shared library - no LTO for Python/dlopen compatibility
 build/libros3.so: build/ros3_so.o
