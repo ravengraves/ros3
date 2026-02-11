@@ -43,7 +43,7 @@ sleep 0.1
 "$BUILD_DIR/rosenet_tx" "$SRC_TOPIC" 127.0.0.1 $PORT >/dev/null 2>&1 &
 PID_TX=$!
 
-sleep 0.1
+sleep 0.5
 
 export ROSE_BASE="test2"
 

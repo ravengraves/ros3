@@ -7,6 +7,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
+#include <sched.h> 
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -150,13 +151,13 @@ int main(int argc, char **argv) {
 	// Main loop: spin while data flows, sleep after 1ms idle
 	mirage_msg *msg = mirage_create(buf_size, NULL);
 	u64 count = 0;
-	u64 idle_start = 0;
+	u64 idle_spins = 0;
 
 	while(rose_ok(node)) {
 		msg->length = msg->max_length;
 		i64 r = read_last ? rose_readlast(sub, msg) : rose_read(sub, msg);
 		if(r >= 0) {
-			idle_start = 0;
+			idle_spins = 0;
 			if(use_udp) {
 				sendto(sock, msg->data, (size_t) msg->length, 0,
 				       (struct sockaddr *) &addr, sizeof(addr));
@@ -169,11 +170,12 @@ int main(int argc, char **argv) {
 				rose_info("Sent %lu messages", (unsigned long) count);
 			}
 		} else {
-			u64 now = rose_now();
-			if(!idle_start) {
-				idle_start = now;
-			} else if(rose_nanoseconds(now, idle_start) > 1000000ULL) {
-				rose_sleep(1e-3);
+			++idle_spins;                                                      
+			if(idle_spins < 1000) {                                            
+				sched_yield();                                                   
+			} else {
+				continue;
+				// rose_sleep(1e-3);
 			}
 		}
 	}

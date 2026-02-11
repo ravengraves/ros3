@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
 			n = recvfrom(client, msg->data, (size_t) buf_size, MSG_DONTWAIT, NULL, NULL);
 			if(n < 0) {
 				if(errno != EAGAIN && errno != EWOULDBLOCK) break;
-				if(poll(&pfd, 1, 10) <= 0) continue;
+				if(poll(&pfd, 1, 1) <= 0) continue;
 				if(pfd.revents & (POLLERR | POLLHUP)) break;
 				continue;
 			}
@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
 			ssize_t hr = recv(client, &len, 4, MSG_DONTWAIT);
 			if(hr < 0) {
 				if(errno != EAGAIN && errno != EWOULDBLOCK) break;
-				if(poll(&pfd, 1, 10) <= 0) continue;
+				if(poll(&pfd, 1, 1) <= 0) continue;
 				if(pfd.revents & (POLLERR | POLLHUP)) break;
 				continue;
 			}
@@ -194,6 +194,7 @@ int main(int argc, char **argv) {
 
 		if(n > 0) {
 			msg->length = n;
+			msg->cursor = n;
 			rose_publish(pub, msg);
 			if(++count % 10000 == 0) {
 				rose_info("Received %lu messages", (unsigned long) count);
