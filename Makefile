@@ -3,29 +3,25 @@ AR := llvm-ar
 GCC ?= gcc
 GCC_AR ?= gcc-ar
 CXX ?= g++
-PREFIX ?= /usr/local
 
-# Base flags without LTO
+BUILD_DIR := build
+INSTALL_DIR ?= install
+
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
 	-fno-stack-protector -D_FORTIFY_SOURCE=0 \
-	-I . -O3 -mtune=native
-
-# LTO flags for static library only (executable linking)
+	-Iinclude -O3 -mtune=native
 CFLAGS_LTO := $(CFLAGS_BASE) -flto
-
-# GCC LTO flags for a g++-linkable static archive
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
-
-# Non-LTO for shared library (Python/dlopen compatibility)
 CFLAGS_SO := $(CFLAGS_BASE)
 
 CEXE := -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
 LDFLAGS := -fuse-ld=lld
-CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -I . -O3 -mtune=native
+CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude -O3 -mtune=native
 
-# arduino version: TARGET=embedded
-SOURCE := ros3.c
+SOURCE := src/ros3.c
+HEADER := include/ros3.h
+COMPLETION_BASH := completions/ros3.bash
 
 ifeq ($(ARCH),x86_64)
 	CFLAGS_BASE += -march=native
@@ -41,109 +37,96 @@ ifeq ($(ARCH),aarch64)
 	CFLAGS_SO += -march=armv8-a
 endif
 
-all: build/libros3.so build/libros3.a build/libros3_gcc_lto.a
+all: $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a
 
-# Shared library - no LTO for Python/dlopen compatibility
-build/libros3.so: build/ros3_so.o
-	$(CC) -shared -o build/libros3.so build/ros3_so.o $(LDFLAGS) -L$(PREFIX)/lib -lmirage -lquicksand
+$(BUILD_DIR)/libros3.so: $(BUILD_DIR)/ros3_so.o
+	$(CC) -shared -o $@ $< $(LDFLAGS) -L/usr/local/lib -lmirage -lquicksand
 
-# Static library - with LTO for best performance in C programs
-build/libros3.a: build/ros3_lto.o
-	$(AR) rcs build/libros3.a build/ros3_lto.o
+$(BUILD_DIR)/libros3.a: $(BUILD_DIR)/ros3_lto.o
+	$(AR) rcs $@ $<
 
-# Static library - GCC LTO object for g++/gcc link compatibility
-build/libros3_gcc_lto.a: build/ros3_gcc_lto.o
-	$(GCC_AR) rcs build/libros3_gcc_lto.a build/ros3_gcc_lto.o
+$(BUILD_DIR)/libros3_gcc_lto.a: $(BUILD_DIR)/ros3_gcc_lto.o
+	$(GCC_AR) rcs $@ $<
 
-build/ros3_so.o: $(SOURCE)
-	mkdir -p build
-	$(CC) -c $(CFLAGS_SO) $(SOURCE) -o build/ros3_so.o
+$(BUILD_DIR)/ros3_so.o: $(SOURCE)
+	mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS_SO) $< -o $@
 
-build/ros3_lto.o: $(SOURCE)
-	mkdir -p build
-	$(CC) -c $(CFLAGS_LTO) $(SOURCE) -o build/ros3_lto.o
+$(BUILD_DIR)/ros3_lto.o: $(SOURCE)
+	mkdir -p $(BUILD_DIR)
+	$(CC) -c $(CFLAGS_LTO) $< -o $@
 
-build/ros3_gcc_lto.o: $(SOURCE)
-	mkdir -p build
-	$(GCC) -c $(CFLAGS_GCC_LTO) $(SOURCE) -o build/ros3_gcc_lto.o
+$(BUILD_DIR)/ros3_gcc_lto.o: $(SOURCE)
+	mkdir -p $(BUILD_DIR)
+	$(GCC) -c $(CFLAGS_GCC_LTO) $< -o $@
 
-build/test: test.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/test test.c build/libros3.a -L/usr/local/lib -l mirage -l quicksand
+$(BUILD_DIR)/test: cmd/test/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/rosemaster: rosemaster.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/rosemaster rosemaster.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosemaster: cmd/rosemaster/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/rosenode: rosenode.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/rosenode rosenode.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosenode: cmd/rosenode/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/rosetopic: rosetopic.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/rosetopic rosetopic.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosetopic: cmd/rosetopic/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/rosenet_tx: rosenet_tx.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/rosenet_tx rosenet_tx.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosenet_tx: cmd/rosenet_tx/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/rosenet_rx: rosenet_rx.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/rosenet_rx rosenet_rx.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosenet_rx: cmd/rosenet_rx/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/test_net_pub: test_net_pub.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/test_net_pub test_net_pub.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/roseserial: cmd/roseserial/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/test_net_sub: test_net_sub.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/test_net_sub test_net_sub.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/test_net_pub: cmd/test_net_pub/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/test_cpp_publisher: test/cpp/publisher.cpp build/libros3_gcc_lto.a
-	$(CXX) $(CXXFLAGS) -o build/test_cpp_publisher test/cpp/publisher.cpp build/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/test_net_sub: cmd/test_net_sub/main.c $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
 
-build/test_cpp_subscriber: test/cpp/subscriber.cpp build/libros3_gcc_lto.a
-	$(CXX) $(CXXFLAGS) -o build/test_cpp_subscriber test/cpp/subscriber.cpp build/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/test_cpp_publisher: test/cpp/publisher.cpp $(BUILD_DIR)/libros3_gcc_lto.a
+	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
 
-build/roseserial: roseserial.c build/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o build/roseserial roseserial.c build/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/test_cpp_subscriber: test/cpp/subscriber.cpp $(BUILD_DIR)/libros3_gcc_lto.a
+	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
 
-compile_commands.json: Makefile
-	@echo '[\n' \
-	'{"directory":"$(PWD)","command":"$(CC) -c $(CFLAGS) $(SOURCE) -o build/ros3.o","file":"$(SOURCE)"},\n' \
-	'{"directory":"$(PWD)","command":"$(CC) -shared -o build/libros3.so build/ros3.o $(LDFLAGS)","file":"build/libros3.so"},\n' \
-	'{"directory":"$(PWD)","command":"$(AR) rcs build/libros3.a build/ros3.o","file":"build/libros3.a"},\n' \
-	'{"directory":"$(PWD)","command":"$(CC) $(CFLAGS) $(CEXE) -o build/test test.c build/libros3.a -fuse-ld=lld -Wl,-gc-sections,-icf=safe","file":"test.c"}\n]' \
-	> $@
-
-install: build/libros3.so build/libros3.a
-	mkdir -p $(PREFIX)/lib
-	mkdir -p $(PREFIX)/include
-	install -m 0644 build/libros3.so $(PREFIX)/lib/
-	install -m 0644 build/libros3.a $(PREFIX)/lib/
-	install -m 0644 ros3.h $(PREFIX)/include/
-	sudo ldconfig
-
-uninstall:
-	rm -f $(PREFIX)/lib/libros3.so
-	rm -f $(PREFIX)/lib/libros3.a
-	rm -f $(PREFIX)/include/ros3.h
-	sudo ldconfig
+install: all $(BUILD_DIR)/rosemaster $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic $(BUILD_DIR)/rosenet_tx $(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/roseserial
+	mkdir -p $(INSTALL_DIR)/bin $(INSTALL_DIR)/lib $(INSTALL_DIR)/include $(INSTALL_DIR)/completions/bash
+	install -m 0755 $(BUILD_DIR)/rosemaster $(INSTALL_DIR)/bin/
+	install -m 0755 $(BUILD_DIR)/rosenode $(INSTALL_DIR)/bin/
+	install -m 0755 $(BUILD_DIR)/rosetopic $(INSTALL_DIR)/bin/
+	install -m 0755 $(BUILD_DIR)/rosenet_tx $(INSTALL_DIR)/bin/
+	install -m 0755 $(BUILD_DIR)/rosenet_rx $(INSTALL_DIR)/bin/
+	install -m 0755 $(BUILD_DIR)/roseserial $(INSTALL_DIR)/bin/
+	install -m 0644 $(BUILD_DIR)/libros3.so $(INSTALL_DIR)/lib/
+	install -m 0644 $(BUILD_DIR)/libros3.a $(INSTALL_DIR)/lib/
+	install -m 0644 $(HEADER) $(INSTALL_DIR)/include/
+	install -m 0644 $(COMPLETION_BASH) $(INSTALL_DIR)/completions/bash/
 
 format:
 	clang-format -style=file -i $$(find . | grep -e '\.c$$' -e '\.h$$')
 
 clean:
-	rm -rf build
+	rm -rf $(BUILD_DIR)
 
-check: build/rosemaster build/rosenode build/rosetopic build/test build/rosenet_tx \
-		build/rosenet_rx build/test_net_pub build/test_net_sub
+clean-install:
+	rm -rf $(INSTALL_DIR)/bin $(INSTALL_DIR)/lib $(INSTALL_DIR)/include $(INSTALL_DIR)/completions
+
+check: $(BUILD_DIR)/rosemaster $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic $(BUILD_DIR)/test $(BUILD_DIR)/rosenet_tx \
+		$(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
 	./test_utils.sh
 	./test_net.sh
 
-# =============================================================================
-# Python bindings
-# =============================================================================
-
-python: build/libros3.so
+python: $(BUILD_DIR)/libros3.so
 	cd lang/python && pip install .
 
-check-python: build/libros3.so
+check-python: $(BUILD_DIR)/libros3.so
 	cd lang/python && pip install --break-system-packages -e . && cd ../.. && python3 test/python/test_pubsub.py
 
-check-cpp: build/rosemaster build/test_cpp_publisher build/test_cpp_subscriber
+check-cpp: $(BUILD_DIR)/rosemaster $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
 	./test_cpp.sh
 
-.PHONY: format clean all check check-net install uninstall python check-python check-cpp
+.PHONY: format clean clean-install all check install python check-python check-cpp

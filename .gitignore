@@ -1,1 +1,6 @@
 build/
+install/bin/
+install/lib/
+install/include/
+install/completions/
+!install/.gitkeep

@@ -1,0 +1,119 @@
+# ROS3 build graph
+# - Library source: src
+# - Public headers: include
+# - CLI sources: cmd/*
+# - Install staging: install/
+
+cc = clang
+gcc = gcc
+ar = llvm-ar
+gcc_ar = gcc-ar
+cxx = g++
+
+builddir = build
+installdir = install
+
+cflags_base = -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC -ffunction-sections -fdata-sections -fno-stack-protector -D_FORTIFY_SOURCE=0 -Iinclude -O3 -mtune=native
+cflags_lto = $cflags_base -flto
+cflags_gcc_lto = $cflags_base -flto -Wno-pedantic
+cflags_so = $cflags_base
+ldflags = -fuse-ld=lld
+cexe = -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
+cxxflags = -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude -O3 -mtune=native
+libs = -L/usr/local/lib -lmirage -lquicksand
+
+rule cc_so
+  command = mkdir -p $builddir && $cc -c $cflags_so $in -o $out
+  description = CC_SO $out
+
+rule cc_lto
+  command = mkdir -p $builddir && $cc -c $cflags_lto $in -o $out
+  description = CC_LTO $out
+
+rule cc_gcc_lto
+  command = mkdir -p $builddir && $gcc -c $cflags_gcc_lto $in -o $out
+  description = CC_GCC_LTO $out
+
+rule link_so
+  command = $cc -shared -o $out $in $ldflags $libs
+  description = LINK_SO $out
+
+rule ar
+  command = $ar rcs $out $in
+  description = AR $out
+
+rule gcc_ar
+  command = $gcc_ar rcs $out $in
+  description = GCC_AR $out
+
+rule link_c
+  command = $cc $cflags_lto $cexe -o $out $in $lib $libs
+  description = LINK_C $out
+
+rule link_cpp
+  command = $cxx $cxxflags -o $out $in $lib $libs
+  description = LINK_CPP $out
+
+rule copy
+  command = mkdir -p $$(dirname $out) && install -m $mode $in $out
+  description = INSTALL $out
+
+build $builddir/ros3_so.o: cc_so src/ros3.c
+build $builddir/ros3_lto.o: cc_lto src/ros3.c
+build $builddir/ros3_gcc_lto.o: cc_gcc_lto src/ros3.c
+
+build $builddir/libros3.so: link_so $builddir/ros3_so.o
+build $builddir/libros3.a: ar $builddir/ros3_lto.o
+build $builddir/libros3_gcc_lto.a: gcc_ar $builddir/ros3_gcc_lto.o
+
+build $builddir/rosemaster: link_c cmd/rosemaster/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/rosenode: link_c cmd/rosenode/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/rosetopic: link_c cmd/rosetopic/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/rosenet_tx: link_c cmd/rosenet_tx/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/rosenet_rx: link_c cmd/rosenet_rx/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/roseserial: link_c cmd/roseserial/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/test: link_c cmd/test/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/test_net_pub: link_c cmd/test_net_pub/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+build $builddir/test_net_sub: link_c cmd/test_net_sub/main.c | $builddir/libros3.a
+  lib = $builddir/libros3.a
+
+build $builddir/test_cpp_publisher: link_cpp test/cpp/publisher.cpp | $builddir/libros3_gcc_lto.a
+  lib = $builddir/libros3_gcc_lto.a
+build $builddir/test_cpp_subscriber: link_cpp test/cpp/subscriber.cpp | $builddir/libros3_gcc_lto.a
+  lib = $builddir/libros3_gcc_lto.a
+
+build $installdir/lib/libros3.so: copy $builddir/libros3.so
+  mode = 0644
+build $installdir/lib/libros3.a: copy $builddir/libros3.a
+  mode = 0644
+build $installdir/include/ros3.h: copy include/ros3.h
+  mode = 0644
+build $installdir/completions/bash/ros3.bash: copy completions/ros3.bash
+  mode = 0644
+build $installdir/bin/rosemaster: copy $builddir/rosemaster
+  mode = 0755
+build $installdir/bin/rosenode: copy $builddir/rosenode
+  mode = 0755
+build $installdir/bin/rosetopic: copy $builddir/rosetopic
+  mode = 0755
+build $installdir/bin/rosenet_tx: copy $builddir/rosenet_tx
+  mode = 0755
+build $installdir/bin/rosenet_rx: copy $builddir/rosenet_rx
+  mode = 0755
+build $installdir/bin/roseserial: copy $builddir/roseserial
+  mode = 0755
+
+build all: phony $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a
+build cli: phony $builddir/rosemaster $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial
+build tests: phony $builddir/test $builddir/test_net_pub $builddir/test_net_sub $builddir/test_cpp_publisher $builddir/test_cpp_subscriber
+build install: phony $installdir/lib/libros3.so $installdir/lib/libros3.a $installdir/include/ros3.h $installdir/completions/bash/ros3.bash $installdir/bin/rosemaster $installdir/bin/rosenode $installdir/bin/rosetopic $installdir/bin/rosenet_tx $installdir/bin/rosenet_rx $installdir/bin/roseserial
+
+default all

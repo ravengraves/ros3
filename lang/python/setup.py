@@ -16,7 +16,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _ros3_ext = Extension(
     name="ros3._ros3",
     sources=["ros3/_ros3.c"],
-    include_dirs=[ROOT, "/usr/local/include"],  # ros3.h + mirage.h/quicksand.h
+    include_dirs=[os.path.join(ROOT, "include"), "/usr/local/include"],  # ros3.h + mirage.h/quicksand.h
     extra_link_args=["-ldl"],
     extra_compile_args=["-Os", "-march=native", "-mtune=native"],
 )
