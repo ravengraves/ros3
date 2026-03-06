@@ -47,6 +47,8 @@ MAN_PAGES := rosemaster.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roses
 DOC_SOURCE_DIR := docs/man/man1
 DOC_BUILD_DIR := $(BUILD_DIR)/docs/man/man1
 DOC_BUILD_TARGETS := $(addprefix $(DOC_BUILD_DIR)/,$(MAN_PAGES))
+WEBDOC_SCRIPT := docs/web/build.sh
+WEBDOC_SOURCES := $(WEBDOC_SCRIPT) docs/web/index.html docs/web/logo.svg $(wildcard docs/web/pages/*.md)
 
 BIN_INSTALL_DIR := $(INSTALL_DIR)/bin
 LIB_INSTALL_DIR := $(INSTALL_DIR)/lib
@@ -132,6 +134,9 @@ $(DOC_BUILD_DIR)/%.1: $(DOC_SOURCE_DIR)/%.1.scd
 
 docs: $(DOC_BUILD_TARGETS)
 
+webdocs: $(WEBDOC_SOURCES)
+	./$(WEBDOC_SCRIPT)
+
 $(PC_FILE): Makefile
 	mkdir -p $(BUILD_DIR)
 	{ \
@@ -201,7 +206,7 @@ check-python: $(BUILD_DIR)/libros3.so
 check-cpp: $(BUILD_DIR)/rosemaster $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
 	./test_cpp.sh
 
-.PHONY: all check clean docs \
+.PHONY: all check clean docs webdocs \
 	install-bin install-docs install-lib install \
 	uninstall-bin uninstall-docs uninstall-lib uninstall \
 	format python check-python check-cpp

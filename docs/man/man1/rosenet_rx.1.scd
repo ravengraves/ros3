@@ -6,10 +6,10 @@ rosenet_rx - receive TCP or UDP frames and publish to ROS3 topic
 
 # SYNOPSIS
 
-*rosenet_rx* <topic> <port> <msg_size> <slots> [--udp]
+*rosenet_rx* <topic> <port> <msg_size> <message_rate> [--udp]
 
 *rosenet_rx* --topic <topic> --port <port> [--udp]++
-  [--message_size N] [--queue_depth N]
+  [--message_size N] [--message_rate N]
 
 # DESCRIPTION
 
@@ -25,6 +25,6 @@ $ rosenet_rx /camera 9000 65536 1024
 
 $ rosenet_rx --topic /camera --port 9000 --udp
 
-## Use explicit message size and queue depth
+## Use explicit message size and message rate
 
-$ rosenet_rx --topic /camera --port 9000 --message_size 1048576 --queue_depth 512
+$ rosenet_rx --topic /camera --port 9000 --message_size 1048576 --message_rate 512

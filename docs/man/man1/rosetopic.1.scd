@@ -12,9 +12,11 @@ rosetopic - inspect and monitor ROS3 topics
 
 *rosetopic* echo <topic>
 
+*rosetopic* rm <topic>
+
 # DESCRIPTION
 
-Lists topics, prints publisher/subscriber details, or streams message payloads.
+Lists topics, prints publisher/subscriber details, streams message payloads, or unlinks a topic shared-memory segment.
 
 # EXAMPLES
 
@@ -29,6 +31,10 @@ $ rosetopic info /chatter
 ## Stream messages from a topic (Ctrl+C to stop)
 
 $ rosetopic echo /chatter
+
+## Remove a topic shared-memory segment
+
+$ rosetopic rm /chatter
 
 # ENVIRONMENT
 

@@ -164,6 +164,10 @@ build .ninja-clean.stamp: run FORCE
   cmd = mkdir -p $builddir && rm -rf $builddir/* && touch .ninja-clean.stamp
   name = clean
 
+build .ninja-webdocs.stamp: run FORCE | docs/web/build.sh docs/web/index.html docs/web/logo.svg docs/web/pages/00-build-install.md docs/web/pages/01-project-setup.md docs/web/pages/02-pubsub-c.md docs/web/pages/03-pubsub-cpp.md docs/web/pages/04-pubsub-python.md docs/web/pages/05-tools.md docs/web/pages/06-roseserial.md docs/web/pages/07-multi-machine.md docs/web/pages/08-mirage-datatypes.md
+  cmd = ./docs/web/build.sh && touch .ninja-webdocs.stamp
+  name = webdocs
+
 build .ninja-uninstall-bin.stamp: run FORCE
   cmd = rm -f $installdir/bin/rosemaster $installdir/bin/rosenode $installdir/bin/rosetopic $installdir/bin/rosenet_tx $installdir/bin/rosenet_rx $installdir/bin/roseserial $installdir/completions/bash/ros3.bash $installdir/share/bash-completion/completions/ros3.bash && touch .ninja-uninstall-bin.stamp
   name = uninstall-bin
@@ -180,6 +184,7 @@ build all: phony $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_
 build check: phony .ninja-check.stamp
 build clean: phony .ninja-clean.stamp
 build docs: phony $builddir/docs/man/man1/rosemaster.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1
+build webdocs: phony .ninja-webdocs.stamp
 
 build install-bin: phony $installdir/bin/rosemaster $installdir/bin/rosenode $installdir/bin/rosetopic $installdir/bin/rosenet_tx $installdir/bin/rosenet_rx $installdir/bin/roseserial $installdir/share/bash-completion/completions/ros3.bash
 build install-docs: phony $installdir/share/man/man1/rosemaster.1 $installdir/share/man/man1/rosenode.1 $installdir/share/man/man1/rosetopic.1 $installdir/share/man/man1/rosenet_tx.1 $installdir/share/man/man1/rosenet_rx.1 $installdir/share/man/man1/roseserial.1
