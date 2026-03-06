@@ -43,8 +43,8 @@ Arduino sketch example:
 	int16_t ret = 0;
 	// Encode: String["hello world"] using Mirage embedded API.
 	ret |= mirage_write_start(&msg);
-	ret |= mirage_write_fn(&msg, "String", MIRAGE_STRLEN, 1);
-	ret |= mirage_write_string(&msg, "hello world", MIRAGE_STRLEN);
+	ret |= mirage_write_fn(&msg, "String", (int16_t)(sizeof("String") - 1), 1);
+	ret |= mirage_write_string(&msg, "hello world", (int16_t)(sizeof("hello world") - 1));
 	if (ret < 0) return;
 	const uint16_t len = (uint16_t)msg.length;
 	// Frame format: [2-byte little-endian length][payload bytes]
