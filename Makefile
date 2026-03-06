@@ -3,9 +3,12 @@ AR := llvm-ar
 GCC ?= gcc
 GCC_AR ?= gcc-ar
 CXX ?= g++
+SCDOC ?= scdoc
 
 BUILD_DIR := build
 INSTALL_DIR ?= install
+VERSION ?= 1.0.0
+PC_PREFIX ?= /usr/local
 
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
@@ -22,6 +25,35 @@ CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude -O3 -mtune=nat
 SOURCE := src/ros3.c
 HEADER := include/ros3.h
 COMPLETION_BASH := completions/ros3.bash
+PC_FILE := $(BUILD_DIR)/ros3.pc
+
+LIB_TARGETS := $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a
+BIN_TARGETS := \
+	$(BUILD_DIR)/rosemaster \
+	$(BUILD_DIR)/rosenode \
+	$(BUILD_DIR)/rosetopic \
+	$(BUILD_DIR)/rosenet_tx \
+	$(BUILD_DIR)/rosenet_rx \
+	$(BUILD_DIR)/roseserial
+TEST_TARGETS := \
+	$(BUILD_DIR)/test \
+	$(BUILD_DIR)/test_net_pub \
+	$(BUILD_DIR)/test_net_sub \
+	$(BUILD_DIR)/test_cpp_publisher \
+	$(BUILD_DIR)/test_cpp_subscriber
+ALL_EXECUTABLES := $(BIN_TARGETS) $(TEST_TARGETS)
+
+MAN_PAGES := rosemaster.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
+DOC_SOURCE_DIR := docs/man/man1
+DOC_BUILD_DIR := $(BUILD_DIR)/docs/man/man1
+DOC_BUILD_TARGETS := $(addprefix $(DOC_BUILD_DIR)/,$(MAN_PAGES))
+
+BIN_INSTALL_DIR := $(INSTALL_DIR)/bin
+LIB_INSTALL_DIR := $(INSTALL_DIR)/lib
+INCLUDE_INSTALL_DIR := $(INSTALL_DIR)/include
+PKGCONFIG_INSTALL_DIR := $(LIB_INSTALL_DIR)/pkgconfig
+DOC_INSTALL_DIR := $(INSTALL_DIR)/share/man/man1
+COMPLETION_INSTALL_DIR := $(INSTALL_DIR)/share/bash-completion/completions
 
 ifeq ($(ARCH),x86_64)
 	CFLAGS_BASE += -march=native
@@ -37,7 +69,8 @@ ifeq ($(ARCH),aarch64)
 	CFLAGS_SO += -march=armv8-a
 endif
 
-all: $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a
+# Build all libraries and executables (default target).
+all: $(LIB_TARGETS) $(ALL_EXECUTABLES)
 
 $(BUILD_DIR)/libros3.so: $(BUILD_DIR)/ros3_so.o
 	$(CC) -shared -o $@ $< $(LDFLAGS) -L/usr/local/lib -lmirage -lquicksand
@@ -93,32 +126,71 @@ $(BUILD_DIR)/test_cpp_publisher: test/cpp/publisher.cpp $(BUILD_DIR)/libros3_gcc
 $(BUILD_DIR)/test_cpp_subscriber: test/cpp/subscriber.cpp $(BUILD_DIR)/libros3_gcc_lto.a
 	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
 
-install: all $(BUILD_DIR)/rosemaster $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic $(BUILD_DIR)/rosenet_tx $(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/roseserial
-	mkdir -p $(INSTALL_DIR)/bin $(INSTALL_DIR)/lib $(INSTALL_DIR)/include $(INSTALL_DIR)/completions/bash
-	install -m 0755 $(BUILD_DIR)/rosemaster $(INSTALL_DIR)/bin/
-	install -m 0755 $(BUILD_DIR)/rosenode $(INSTALL_DIR)/bin/
-	install -m 0755 $(BUILD_DIR)/rosetopic $(INSTALL_DIR)/bin/
-	install -m 0755 $(BUILD_DIR)/rosenet_tx $(INSTALL_DIR)/bin/
-	install -m 0755 $(BUILD_DIR)/rosenet_rx $(INSTALL_DIR)/bin/
-	install -m 0755 $(BUILD_DIR)/roseserial $(INSTALL_DIR)/bin/
-	install -m 0644 $(BUILD_DIR)/libros3.so $(INSTALL_DIR)/lib/
-	install -m 0644 $(BUILD_DIR)/libros3.a $(INSTALL_DIR)/lib/
-	install -m 0644 $(HEADER) $(INSTALL_DIR)/include/
-	install -m 0644 $(COMPLETION_BASH) $(INSTALL_DIR)/completions/bash/
+$(DOC_BUILD_DIR)/%.1: $(DOC_SOURCE_DIR)/%.1.scd
+	mkdir -p $(DOC_BUILD_DIR)
+	$(SCDOC) < $< > $@
+
+docs: $(DOC_BUILD_TARGETS)
+
+$(PC_FILE): Makefile
+	mkdir -p $(BUILD_DIR)
+	{ \
+		echo "prefix=$(PC_PREFIX)"; \
+		echo 'exec_prefix=$${prefix}'; \
+		echo 'libdir=$${exec_prefix}/lib'; \
+		echo 'includedir=$${prefix}/include'; \
+		echo; \
+		echo 'Name: ros3'; \
+		echo 'Description: ROS3 (Rose) publisher/subscriber middleware'; \
+		echo 'Version: $(VERSION)'; \
+		echo 'Libs: -L$${libdir} -lros3'; \
+		echo 'Libs.private: -lmirage -lquicksand'; \
+		echo 'Cflags: -I$${includedir}'; \
+	} > $@
+
+check: $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
+	./test_utils.sh
+	./test_net.sh
+
+install-bin: $(BIN_TARGETS)
+	mkdir -p $(BIN_INSTALL_DIR) $(COMPLETION_INSTALL_DIR)
+	rm -f $(INSTALL_DIR)/completions/bash/ros3.bash
+	install -m 0755 $(BIN_TARGETS) $(BIN_INSTALL_DIR)/
+	install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/ros3.bash
+
+install-docs: docs
+	mkdir -p $(DOC_INSTALL_DIR)
+	install -m 0644 $(DOC_BUILD_TARGETS) $(DOC_INSTALL_DIR)/
+
+install-lib: $(LIB_TARGETS) $(PC_FILE)
+	mkdir -p $(LIB_INSTALL_DIR) $(INCLUDE_INSTALL_DIR) $(PKGCONFIG_INSTALL_DIR)
+	install -m 0644 $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a $(LIB_INSTALL_DIR)/
+	install -m 0644 $(HEADER) $(INCLUDE_INSTALL_DIR)/ros3.h
+	install -m 0644 $(PC_FILE) $(PKGCONFIG_INSTALL_DIR)/ros3.pc
+
+install: install-lib install-bin install-docs
+
+uninstall-bin:
+	rm -f $(BIN_INSTALL_DIR)/rosemaster $(BIN_INSTALL_DIR)/rosenode $(BIN_INSTALL_DIR)/rosetopic
+	rm -f $(BIN_INSTALL_DIR)/rosenet_tx $(BIN_INSTALL_DIR)/rosenet_rx $(BIN_INSTALL_DIR)/roseserial
+	rm -f $(INSTALL_DIR)/completions/bash/ros3.bash
+	rm -f $(COMPLETION_INSTALL_DIR)/ros3.bash
+
+uninstall-docs:
+	rm -f $(addprefix $(DOC_INSTALL_DIR)/,$(MAN_PAGES))
+
+uninstall-lib:
+	rm -f $(LIB_INSTALL_DIR)/libros3.so $(LIB_INSTALL_DIR)/libros3.a $(LIB_INSTALL_DIR)/libros3_gcc_lto.a
+	rm -f $(INCLUDE_INSTALL_DIR)/ros3.h
+	rm -f $(PKGCONFIG_INSTALL_DIR)/ros3.pc
+
+uninstall: uninstall-lib uninstall-bin uninstall-docs
 
 format:
 	clang-format -style=file -i $$(find . | grep -e '\.c$$' -e '\.h$$')
 
 clean:
 	rm -rf $(BUILD_DIR)
-
-clean-install:
-	rm -rf $(INSTALL_DIR)/bin $(INSTALL_DIR)/lib $(INSTALL_DIR)/include $(INSTALL_DIR)/completions
-
-check: $(BUILD_DIR)/rosemaster $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic $(BUILD_DIR)/test $(BUILD_DIR)/rosenet_tx \
-		$(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
-	./test_utils.sh
-	./test_net.sh
 
 python: $(BUILD_DIR)/libros3.so
 	cd lang/python && pip install .
@@ -129,4 +201,7 @@ check-python: $(BUILD_DIR)/libros3.so
 check-cpp: $(BUILD_DIR)/rosemaster $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
 	./test_cpp.sh
 
-.PHONY: format clean clean-install all check install python check-python check-cpp
+.PHONY: all check clean docs \
+	install-bin install-docs install-lib install \
+	uninstall-bin uninstall-docs uninstall-lib uninstall \
+	format python check-python check-cpp

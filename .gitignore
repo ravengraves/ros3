@@ -2,5 +2,6 @@ build/
 install/bin/
 install/lib/
 install/include/
-install/completions/
+install/share/
+.ninja-*.stamp
 !install/.gitkeep

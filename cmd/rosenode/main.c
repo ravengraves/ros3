@@ -31,6 +31,22 @@ static void print_usage(void) {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Environment:\n");
 	fprintf(stderr, "  ROSE_BASE  Namespace (default: 'rose')\n");
+	fprintf(stderr, "  ROSE_QUERY_TIMEOUT_MS  Query timeout in milliseconds (default: 1000)\n");
+}
+
+static int get_query_timeout_ms(void) {
+	const char *s = getenv("ROSE_QUERY_TIMEOUT_MS");
+	if(!s || !s[0]) {
+		return 1000;
+	}
+
+	char *end = NULL;
+	long v = strtol(s, &end, 10);
+	if(end == s || *end != '\0' || v <= 0 || v > 60000) {
+		return 1000;
+	}
+
+	return (int) v;
 }
 
 // Build query topic name using rose_topic_to_shm helper
@@ -165,7 +181,7 @@ static void read_and_print_list(quicksand_connection *conn) {
 	i64 pid, last_heartbeat;
 
 	// Wait for responses (with timeout)
-	int timeout_ms = 1000;
+	int timeout_ms = get_query_timeout_ms();
 	int waited = 0;
 
 	while(waited < timeout_ms) {
@@ -206,7 +222,7 @@ static void read_and_print_info(quicksand_connection *conn) {
 	static char subs[16384];
 	i64 pid, last_heartbeat;
 
-	int timeout_ms = 1000;
+	int timeout_ms = get_query_timeout_ms();
 	int waited = 0;
 	int found = 0;
 
@@ -261,7 +277,7 @@ static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
 	static char subs[16384];
 	i64 pid, last_heartbeat;
 
-	int timeout_ms = 1000;
+	int timeout_ms = get_query_timeout_ms();
 	int waited = 0;
 	int killed = 0;
 

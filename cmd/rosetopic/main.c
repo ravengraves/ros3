@@ -33,6 +33,22 @@ static void print_usage(void) {
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Environment:\n");
 	fprintf(stderr, "  ROSE_BASE  Namespace (default: 'rose')\n");
+	fprintf(stderr, "  ROSE_QUERY_TIMEOUT_MS  Query timeout in milliseconds (default: 1000)\n");
+}
+
+static int get_query_timeout_ms(void) {
+	const char *s = getenv("ROSE_QUERY_TIMEOUT_MS");
+	if(!s || !s[0]) {
+		return 1000;
+	}
+
+	char *end = NULL;
+	long v = strtol(s, &end, 10);
+	if(end == s || *end != '\0' || v <= 0 || v > 60000) {
+		return 1000;
+	}
+
+	return (int) v;
 }
 
 // Convert shm topic name to display format: start from first %, replace % with /
@@ -208,7 +224,7 @@ static void read_and_print_topics(quicksand_connection *conn) {
 	static char topics[1024][256];
 	int topic_count = 0;
 
-	int timeout_ms = 1000;
+	int timeout_ms = get_query_timeout_ms();
 	int waited = 0;
 
 	while(waited < timeout_ms) {
@@ -263,7 +279,7 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 	static char subscribers[256][256];
 	int pub_count = 0, sub_count = 0;
 
-	int timeout_ms = 1000;
+	int timeout_ms = get_query_timeout_ms();
 	int waited = 0;
 
 	while(waited < timeout_ms) {
