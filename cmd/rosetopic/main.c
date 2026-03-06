@@ -51,6 +51,16 @@ static int get_query_timeout_ms(void) {
 	return (int) v;
 }
 
+static int get_query_poll_step_ms(int timeout_ms) {
+	if(timeout_ms <= 20) {
+		return 1;
+	}
+	if(timeout_ms <= 200) {
+		return 2;
+	}
+	return 10;
+}
+
 // Convert shm topic name to display format: start from first %, replace % with /
 static void topic_to_display(char *out, size_t out_size, const char *shm_name) {
 	// Skip to first %
@@ -225,6 +235,7 @@ static void read_and_print_topics(quicksand_connection *conn) {
 	int topic_count = 0;
 
 	int timeout_ms = get_query_timeout_ms();
+	int poll_ms = get_query_poll_step_ms(timeout_ms);
 	int waited = 0;
 
 	while(waited < timeout_ms) {
@@ -244,8 +255,8 @@ static void read_and_print_topics(quicksand_connection *conn) {
 			}
 			waited = 0;
 		} else {
-			quicksand_sleep(10e6);
-			waited += 10;
+			quicksand_sleep((u64) poll_ms * 1000000ULL);
+			waited += poll_ms;
 		}
 	}
 
@@ -280,6 +291,7 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 	int pub_count = 0, sub_count = 0;
 
 	int timeout_ms = get_query_timeout_ms();
+	int poll_ms = get_query_poll_step_ms(timeout_ms);
 	int waited = 0;
 
 	while(waited < timeout_ms) {
@@ -313,8 +325,8 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 			}
 			waited = 0;
 		} else {
-			quicksand_sleep(10e6);
-			waited += 10;
+			quicksand_sleep((u64) poll_ms * 1000000ULL);
+			waited += poll_ms;
 		}
 	}
 

@@ -1,7 +1,7 @@
 # Bash completion for ROS3 CLI tools.
 # Dynamic completion is cached for one second and queried with a short timeout.
 
-: "${ROSE_COMPLETE_TIMEOUT_MS:=25}"
+: "${ROSE_COMPLETE_TIMEOUT_MS:=10}"
 
 _ros3_comp_nodes_sec=-1
 _ros3_comp_topics_sec=-1

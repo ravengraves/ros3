@@ -49,6 +49,16 @@ static int get_query_timeout_ms(void) {
 	return (int) v;
 }
 
+static int get_query_poll_step_ms(int timeout_ms) {
+	if(timeout_ms <= 20) {
+		return 1;
+	}
+	if(timeout_ms <= 200) {
+		return 2;
+	}
+	return 10;
+}
+
 // Build query topic name using rose_topic_to_shm helper
 static void build_topic_name(char *buf, size_t buf_size, const char *suffix) {
 	char topic[256];
@@ -182,6 +192,7 @@ static void read_and_print_list(quicksand_connection *conn) {
 
 	// Wait for responses (with timeout)
 	int timeout_ms = get_query_timeout_ms();
+	int poll_ms = get_query_poll_step_ms(timeout_ms);
 	int waited = 0;
 
 	while(waited < timeout_ms) {
@@ -201,8 +212,8 @@ static void read_and_print_list(quicksand_connection *conn) {
 			}
 			waited = 0; // Reset timeout on successful read
 		} else {
-			quicksand_sleep(10e6); // 10ms
-			waited += 10;
+			quicksand_sleep((u64) poll_ms * 1000000ULL);
+			waited += poll_ms;
 		}
 	}
 
@@ -223,6 +234,7 @@ static void read_and_print_info(quicksand_connection *conn) {
 	i64 pid, last_heartbeat;
 
 	int timeout_ms = get_query_timeout_ms();
+	int poll_ms = get_query_poll_step_ms(timeout_ms);
 	int waited = 0;
 	int found = 0;
 
@@ -252,8 +264,8 @@ static void read_and_print_info(quicksand_connection *conn) {
 			}
 			waited = 0;
 		} else {
-			quicksand_sleep(10e6);
-			waited += 10;
+			quicksand_sleep((u64) poll_ms * 1000000ULL);
+			waited += poll_ms;
 		}
 	}
 
@@ -278,6 +290,7 @@ static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
 	i64 pid, last_heartbeat;
 
 	int timeout_ms = get_query_timeout_ms();
+	int poll_ms = get_query_poll_step_ms(timeout_ms);
 	int waited = 0;
 	int killed = 0;
 
@@ -307,8 +320,8 @@ static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
 			}
 			waited = 0;
 		} else {
-			quicksand_sleep(10e6);
-			waited += 10;
+			quicksand_sleep((u64) poll_ms * 1000000ULL);
+			waited += poll_ms;
 		}
 	}
 
