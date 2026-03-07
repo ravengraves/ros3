@@ -59,6 +59,7 @@ render_page tools 05-tools.md
 render_page roseserial 06-roseserial.md
 render_page multi-machine 07-multi-machine.md
 render_page mirage-datatypes 08-mirage-datatypes.md
+render_page package-control-subtree 09-package-control-subtree.md
 
 replace_block build-install
 replace_block project-setup
@@ -69,5 +70,6 @@ replace_block tools
 replace_block roseserial
 replace_block multi-machine
 replace_block mirage-datatypes
+replace_block package-control-subtree
 
 echo "generated $OUT_FILE"

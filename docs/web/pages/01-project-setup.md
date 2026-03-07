@@ -28,7 +28,7 @@ export ROSE_BASE=robot1
 Terminal 1 (master):
 
 ```bash
-./build/rosemaster
+./build/rosecore
 ```
 
 Terminal 2 (subscriber):

@@ -2,20 +2,20 @@
 
 ### Overview
 
-- `rosemaster`: node/topic registry and query endpoint
+- `rosecore`: node/topic registry and query endpoint
 - `rosenode`: inspect/kill nodes
 - `rosetopic`: list/inspect/echo/remove topics
 - `rosenet_tx`: bridge local topic to TCP/UDP
 - `rosenet_rx`: bridge TCP/UDP to local topic
 - `roseserial`: serial device bridge for microcontrollers
 
-### rosemaster
+### rosecore
 
 Topic: master registry and discovery service.
 
 Commands and options:
 
-- `rosemaster`
+- `rosecore`
 - No CLI flags.
 
 ### rosenode

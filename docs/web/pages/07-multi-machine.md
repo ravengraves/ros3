@@ -2,7 +2,7 @@
 
 ### Pattern
 
-- Run one `rosemaster` per machine namespace.
+- Run one `rosecore` per machine namespace.
 - Use `rosenet_tx` and `rosenet_rx` to bridge topics over TCP.
 
 ### Example

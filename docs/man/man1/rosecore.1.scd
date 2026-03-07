@@ -2,11 +2,11 @@ ROSEMASTER(1)
 
 # NAME
 
-rosemaster - ROS3 node registry and discovery daemon
+rosecore - ROS3 node registry and discovery daemon
 
 # SYNOPSIS
 
-*rosemaster*
+*rosecore*
 
 # DESCRIPTION
 
@@ -17,18 +17,18 @@ registration. Run this before other ROS3 tools.
 
 ## Start the master in the default namespace
 
-$ rosemaster
+$ rosecore
 
 ## Start the master in a custom namespace
 
 $ export ROSE_BASE=robot1
-$ rosemaster
+$ rosecore
 
 ## Local startup workflow (default namespace)
 
 Terminal 1 (start master):
 
-$ rosemaster
+$ rosecore
 
 Terminal 2 (start a node):
 
@@ -45,7 +45,7 @@ $ rosetopic info /chatter
 Terminal 1:
 
 $ export ROSE_BASE=robot1
-$ rosemaster
+$ rosecore
 
 Terminal 2:
 
@@ -64,7 +64,7 @@ Graceful stop of all demo nodes:
 
 $ rosenode kill demo
 
-Then stop rosemaster with Ctrl+C.
+Then stop rosecore with Ctrl+C.
 
 # ENVIRONMENT
 

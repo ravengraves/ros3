@@ -3,7 +3,7 @@
 ### Example flow
 
 ```bash
-./build/rosemaster &
+./build/rosecore &
 ./build/test_cpp_subscriber cpp_chatter 10
 ./build/test_cpp_publisher cpp_chatter 10 100
 ```

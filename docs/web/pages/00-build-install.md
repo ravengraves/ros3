@@ -35,14 +35,24 @@ make -f Makefile.darwin install PREFIX=/usr/local
 
 ### Windows
 
-Recommended: use WSL and follow Linux steps.  
-Alternative: MSYS2/MinGW can work, but support is less complete than Linux/macOS.
+Use MinGW + Ninja with the Windows build graph.
 
 ```bash
-# in WSL
-make
-make check
-make install PREFIX=/usr/local
+# Install toolchain (MSYS2 example)
+pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-binutils ninja
+
+# Build/install dependencies first
+cd ../mirage && ninja -f build_windows.ninja install
+cd ../quicksand && ninja -f build_windows.ninja install
+cd ../ros3
+
+# Point ros3 build at dependency install roots
+export CFLAGS="-I../mirage/install/windows/include -I../quicksand/install/windows/include"
+export LDFLAGS="-L../mirage/install/windows/lib -L../quicksand/install/windows/lib"
+
+# Build/install ros3 Windows binaries
+ninja -f build_windows.ninja all
+ninja -f build_windows.ninja install
 ```
 
 ### Build web docs

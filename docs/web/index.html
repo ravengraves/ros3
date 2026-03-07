@@ -4,23 +4,24 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ROS3 Docs</title>
 <style>
-:root{--bg:#0b0f13;--panel:#121a22;--fg:#ecf2ff;--muted:#a8b6cf;--line:#1f2a39;--link:#8fd8ff}
+:root{--bg:#ffffff;--panel:#fff7fb;--fg:#2a1022;--muted:#7a476f;--line:#f2cadd;--link:#c2187a}
+@media (prefers-color-scheme: dark){:root{--bg:#19060e;--panel:#2a0b18;--fg:#ffeef8;--muted:#d39bc3;--line:#5b1f3f;--link:#ff7ac7}}
 *{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);display:grid;grid-template-columns:290px 1fr;min-height:100vh}
 a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 aside{border-right:1px solid var(--line);padding:16px;position:sticky;top:0;height:100vh;overflow:auto;background:var(--panel)}
 aside img{width:64px;height:64px;display:block;margin:0 auto 10px}aside h1{margin:0 0 10px;font-size:20px;text-align:center}
-aside p{margin:0 0 12px;color:var(--muted);font-size:13px}#q{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#0f141c;color:var(--fg)}
-nav{margin-top:12px;display:grid;gap:6px}nav a{padding:6px 8px;border-radius:6px}nav a:hover,nav a.active{background:#0d141e;text-decoration:none}
-main{padding:18px 24px;max-width:1100px}.doc-page{display:none}.doc-page.active{display:block}h2{margin:0 0 10px}h3{margin:14px 0 8px}pre{background:#0f141c;border:1px solid var(--line);padding:10px;border-radius:8px;overflow:auto}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-#search-view{display:grid;gap:10px}.search-head{color:var(--muted);font-size:13px}.res{display:block;width:100%;text-align:left;border:1px solid var(--line);border-radius:8px;background:#0f141c;color:var(--fg);padding:9px 10px;cursor:pointer}.res strong{display:block;font-size:14px}.res span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.res.empty{cursor:default}
-#pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}#pager button{border:1px solid var(--line);background:#0f141c;color:var(--fg);border-radius:8px;padding:7px 10px;cursor:pointer}#pager button:disabled{opacity:.45;cursor:default}#page-label{font-size:13px;color:var(--muted)}
+aside p{margin:0 0 12px;color:var(--muted);font-size:13px}#q{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+nav{margin-top:12px;display:grid;gap:6px}nav a{padding:6px 8px;border-radius:6px}nav a:hover,nav a.active{background:var(--bg);text-decoration:none}
+main{padding:18px 24px;max-width:1100px}.doc-page{display:none}.doc-page.active{display:block}h2{margin:0 0 10px}h3{margin:14px 0 8px}pre{background:var(--panel);border:1px solid var(--line);padding:10px;border-radius:8px;overflow:auto}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#search-view{display:grid;gap:10px}.search-head{color:var(--muted);font-size:13px}.res{display:block;width:100%;text-align:left;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg);padding:9px 10px;cursor:pointer}.res strong{display:block;font-size:14px}.res span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.res.empty{cursor:default}
+#pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}#pager button{border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:7px 10px;cursor:pointer}#pager button:disabled{opacity:.45;cursor:default}#page-label{font-size:13px;color:var(--muted)}
 @media (max-width:980px){body{grid-template-columns:1fr}aside{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}}
 </style>
 <body>
 <aside>
   <img src="logo.svg" alt="ROS3 logo">
   <h1>ROS3 Docs</h1>
-  <p>Section pages with fast regex search.</p>
+  <p>ROS3 is a lightweight robotics pub/sub framework with shared-memory transport and simple CLI tools.</p>
   <input id="q" placeholder="search (regex)">
   <nav id="nav">
     <a href="#build-install">Build and Installation</a>
@@ -32,6 +33,7 @@ main{padding:18px 24px;max-width:1100px}.doc-page{display:none}.doc-page.active{
     <a href="#roseserial">roseserial</a>
     <a href="#multi-machine">Multi-machine Usage</a>
     <a href="#mirage-datatypes">Mirage Datatypes</a>
+    <a href="#package-control-subtree">Package Control</a>
   </nav>
 </aside>
 <main>
@@ -86,6 +88,11 @@ main{padding:18px 24px;max-width:1100px}.doc-page{display:none}.doc-page.active{
       <p>Run <code>./docs/web/build.sh</code> to generate this section.</p>
       <!-- PAGE:mirage-datatypes:end -->
     </article>
+    <article id="package-control-subtree" class="doc-page" data-title="Package Control (Git Subtree)">
+      <!-- PAGE:package-control-subtree:start -->
+      <p>Run <code>./docs/web/build.sh</code> to generate this section.</p>
+      <!-- PAGE:package-control-subtree:end -->
+    </article>
   </section>
 
   <footer id="pager">
@@ -95,7 +102,151 @@ main{padding:18px 24px;max-width:1100px}.doc-page{display:none}.doc-page.active{
   </footer>
 </main>
 <script>
-(()=>{const q=document.getElementById('q'),nav=document.getElementById('nav'),searchView=document.getElementById('search-view'),searchHead=document.getElementById('search-head'),results=document.getElementById('results'),pagesView=document.getElementById('pages-view'),pager=document.getElementById('pager'),prev=document.getElementById('prev'),next=document.getElementById('next'),label=document.getElementById('page-label');const links=[...nav.querySelectorAll('a')];const pages=[...document.querySelectorAll('.doc-page')].map(el=>({id:el.id,title:el.dataset.title||el.id,el,text:(el.dataset.title+' '+el.textContent).replace(/\s+/g,' ').trim()}));const esc=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const snippet=(t,re)=>{const i=t.search(re);if(i<0)return t.slice(0,150);const a=Math.max(0,i-50),b=Math.min(t.length,i+110);return(a?'...':'')+t.slice(a,b)+(b<t.length?'...':'')};const setNav=id=>{for(const a of links)a.classList.toggle('active',a.getAttribute('href')==='#'+id)};const pageIndex=id=>pages.findIndex(p=>p.id===id);const showPage=id=>{const idx=pageIndex(id)>=0?pageIndex(id):0;for(let i=0;i<pages.length;i++)pages[i].el.classList.toggle('active',i===idx);const p=pages[idx];setNav(p.id);label.textContent=(idx+1)+' of '+pages.length+' - '+p.title;prev.disabled=idx<=0;next.disabled=idx>=pages.length-1;pagesView.hidden=false;pager.hidden=false;searchView.hidden=true};const route=()=>showPage((location.hash||'#'+pages[0].id).slice(1));window.addEventListener('hashchange',route);route();prev.addEventListener('click',()=>{const idx=pageIndex((location.hash||'#'+pages[0].id).slice(1));if(idx>0)location.hash='#'+pages[idx-1].id});next.addEventListener('click',()=>{const idx=pageIndex((location.hash||'#'+pages[0].id).slice(1));if(idx>=0&&idx<pages.length-1)location.hash='#'+pages[idx+1].id});nav.addEventListener('click',e=>{const a=e.target.closest('a[href^="#"]');if(!a)return;q.value='';results.innerHTML='';searchView.hidden=true;pagesView.hidden=false;pager.hidden=false});const doSearch=()=>{const s=q.value.trim();if(!s){results.innerHTML='';searchView.hidden=true;pagesView.hidden=false;pager.hidden=false;route();return}let re;try{re=new RegExp(s,'i')}catch{searchHead.textContent='Invalid regex';results.innerHTML='<div class="res empty"><strong>Invalid regex</strong><span>Fix the pattern and try again.</span></div>';searchView.hidden=false;pagesView.hidden=true;pager.hidden=true;return}const hit=[];for(const p of pages){if(re.test(p.text))hit.push(p)}searchHead.textContent=hit.length+' result'+(hit.length===1?'':'s')+' for /'+s+'/i';if(!hit.length){results.innerHTML='<div class="res empty"><strong>No matches</strong><span>Try a broader pattern.</span></div>'}else{results.innerHTML=hit.slice(0,40).map(p=>'<button type="button" class="res" data-id="'+esc(p.id)+'"><strong>'+esc(p.title)+'</strong><span>'+esc(snippet(p.text,re))+'</span></button>').join('')}searchView.hidden=false;pagesView.hidden=true;pager.hidden=true};let raf=0;q.addEventListener('input',()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;doSearch()})});results.addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(!b)return;location.hash='#'+b.dataset.id;q.value='';results.innerHTML='';searchView.hidden=true;pagesView.hidden=false;pager.hidden=false})})();
+(() => {
+  const q = document.getElementById("q");
+  const nav = document.getElementById("nav");
+  const searchView = document.getElementById("search-view");
+  const searchHead = document.getElementById("search-head");
+  const results = document.getElementById("results");
+  const pagesView = document.getElementById("pages-view");
+  const pager = document.getElementById("pager");
+  const prev = document.getElementById("prev");
+  const next = document.getElementById("next");
+  const label = document.getElementById("page-label");
+
+  const links = [...nav.querySelectorAll("a")];
+  const pages = [...document.querySelectorAll(".doc-page")].map((el) => ({
+    id: el.id,
+    title: el.dataset.title || el.id,
+    el,
+    text: (el.dataset.title + " " + el.textContent).replace(/\s+/g, " ").trim(),
+  }));
+
+  const esc = (s) =>
+    s.replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    })[c]);
+
+  const snippet = (t, re) => {
+    const i = t.search(re);
+    if (i < 0) return t.slice(0, 150);
+    const a = Math.max(0, i - 50);
+    const b = Math.min(t.length, i + 110);
+    return (a ? "..." : "") + t.slice(a, b) + (b < t.length ? "..." : "");
+  };
+
+  const setNav = (id) => {
+    for (const a of links) a.classList.toggle("active", a.getAttribute("href") === "#" + id);
+  };
+
+  const pageIndex = (id) => pages.findIndex((p) => p.id === id);
+
+  const clearSearch = () => {
+    q.value = "";
+    searchHead.textContent = "";
+    results.innerHTML = "";
+  };
+
+  const showPage = (id) => {
+    const idx = pageIndex(id) >= 0 ? pageIndex(id) : 0;
+    for (let i = 0; i < pages.length; i++) pages[i].el.classList.toggle("active", i === idx);
+    const p = pages[idx];
+    setNav(p.id);
+    label.textContent = (idx + 1) + " of " + pages.length + " - " + p.title;
+    prev.disabled = idx <= 0;
+    next.disabled = idx >= pages.length - 1;
+    pagesView.hidden = false;
+    pager.hidden = false;
+    searchView.hidden = true;
+  };
+
+  const route = () => showPage((location.hash || "#" + pages[0].id).slice(1));
+  window.addEventListener("hashchange", route);
+  route();
+
+  prev.addEventListener("click", () => {
+    const idx = pageIndex((location.hash || "#" + pages[0].id).slice(1));
+    if (idx > 0) location.hash = "#" + pages[idx - 1].id;
+  });
+
+  next.addEventListener("click", () => {
+    const idx = pageIndex((location.hash || "#" + pages[0].id).slice(1));
+    if (idx >= 0 && idx < pages.length - 1) location.hash = "#" + pages[idx + 1].id;
+  });
+
+  nav.addEventListener("click", (e) => {
+    const a = e.target.closest('a[href^="#"]');
+    if (!a) return;
+    clearSearch();
+    searchView.hidden = true;
+    pagesView.hidden = false;
+    pager.hidden = false;
+  });
+
+  const doSearch = () => {
+    const s = q.value.trim();
+    if (!s) {
+      searchHead.textContent = "";
+      results.innerHTML = "";
+      searchView.hidden = true;
+      pagesView.hidden = false;
+      pager.hidden = false;
+      route();
+      return;
+    }
+
+    let re;
+    try {
+      re = new RegExp(s, "i");
+    } catch {
+      searchHead.textContent = "Invalid regex";
+      results.innerHTML = '<div class="res empty"><strong>Invalid regex</strong><span>Fix the pattern and try again.</span></div>';
+      searchView.hidden = false;
+      pagesView.hidden = true;
+      pager.hidden = true;
+      return;
+    }
+
+    const hit = [];
+    for (const p of pages) if (re.test(p.text)) hit.push(p);
+
+    searchHead.textContent = hit.length + " result" + (hit.length === 1 ? "" : "s") + " for /" + s + "/i";
+    if (!hit.length) {
+      results.innerHTML = '<div class="res empty"><strong>No matches</strong><span>Try a broader pattern.</span></div>';
+    } else {
+      results.innerHTML = hit
+        .slice(0, 40)
+        .map((p) => '<button type="button" class="res" data-id="' + esc(p.id) + '"><strong>' + esc(p.title) + "</strong><span>" + esc(snippet(p.text, re)) + "</span></button>")
+        .join("");
+    }
+
+    searchView.hidden = false;
+    pagesView.hidden = true;
+    pager.hidden = true;
+  };
+
+  let raf = 0;
+  q.addEventListener("input", () => {
+    if (!raf) raf = requestAnimationFrame(() => {
+      raf = 0;
+      doSearch();
+    });
+  });
+
+  results.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-id]");
+    if (!b) return;
+    clearSearch();
+    location.hash = "#" + b.dataset.id;
+    searchView.hidden = true;
+    pagesView.hidden = false;
+    pager.hidden = false;
+  });
+})();
 </script>
 </body>
 </html>
