@@ -97,6 +97,7 @@ static rose_node *(*p_rose_create_node)(char *, int64_t, char *, int64_t,
                                          void *(*)(size_t), void (*)(void *)) = NULL;
 static void (*p_rose_shutdown)(rose_node *) = NULL;
 static int64_t (*p_rose_ok)(rose_node *) = NULL;
+static const char *(*p_rose_last_error)(void) = NULL;
 
 /* Publisher/Subscriber */
 static rose_publisher *(*p_rose_create_pub)(rose_node *, char *, int64_t,
@@ -309,7 +310,9 @@ py_rose_create_node(PyObject *self, PyObject *args, PyObject *kwds) {
 	                                      NULL, NULL, 0,
 	                                      NULL, NULL);
 	if (!node) {
-		PyErr_SetString(PyExc_RuntimeError, "Failed to create rose node");
+		const char *detail = p_rose_last_error ? p_rose_last_error() : NULL;
+		PyErr_SetString(PyExc_RuntimeError,
+		                (detail && detail[0]) ? detail : "Failed to create rose node");
 		return NULL;
 	}
 
@@ -363,7 +366,9 @@ py_rose_create_pub(PyObject *self, PyObject *args) {
 	rose_publisher *pub = p_rose_create_pub(node, (char *)topic, (int64_t)topic_len,
 	                                         message_size, message_hz);
 	if (!pub) {
-		PyErr_SetString(PyExc_RuntimeError, "Failed to create publisher");
+		const char *detail = p_rose_last_error ? p_rose_last_error() : NULL;
+		PyErr_SetString(PyExc_RuntimeError,
+		                (detail && detail[0]) ? detail : "Failed to create publisher");
 		return NULL;
 	}
 
@@ -389,7 +394,9 @@ py_rose_create_sub(PyObject *self, PyObject *args) {
 	rose_subscriber *sub = p_rose_create_sub(node, (char *)topic, (int64_t)topic_len,
 	                                          latest_only, NULL);
 	if (!sub) {
-		PyErr_SetString(PyExc_RuntimeError, "Failed to create subscriber");
+		const char *detail = p_rose_last_error ? p_rose_last_error() : NULL;
+		PyErr_SetString(PyExc_RuntimeError,
+		                (detail && detail[0]) ? detail : "Failed to create subscriber");
 		return NULL;
 	}
 
@@ -449,7 +456,12 @@ py_rose_publish(PyObject *self, PyObject *args) {
 	PyBuffer_Release(&view);
 
 	if (rc < 0) {
-		PyErr_Format(PyExc_RuntimeError, "rose_publish failed: %lld", (long long)rc);
+		const char *detail = p_rose_last_error ? p_rose_last_error() : NULL;
+		if (detail && detail[0]) {
+			PyErr_SetString(PyExc_RuntimeError, detail);
+		} else {
+			PyErr_Format(PyExc_RuntimeError, "rose_publish failed: %lld", (long long)rc);
+		}
 		return NULL;
 	}
 
@@ -486,9 +498,17 @@ py_rose_read(PyObject *self, PyObject *args) {
 
 	PyBuffer_Release(&view);
 
-	if (rc < 0) {
-		/* No data available */
+	if (rc == ROSE_NO_DATA) {
 		Py_RETURN_NONE;
+	}
+	if (rc < 0) {
+		const char *detail = p_rose_last_error ? p_rose_last_error() : NULL;
+		if (detail && detail[0]) {
+			PyErr_SetString(PyExc_RuntimeError, detail);
+		} else {
+			PyErr_Format(PyExc_RuntimeError, "rose_read failed: %lld", (long long)rc);
+		}
+		return NULL;
 	}
 
 	/* Return (data_length, remaining_messages) */
@@ -525,9 +545,17 @@ py_rose_readlast(PyObject *self, PyObject *args) {
 
 	PyBuffer_Release(&view);
 
-	if (rc < 0) {
-		/* No data available */
+	if (rc == ROSE_NO_DATA) {
 		Py_RETURN_NONE;
+	}
+	if (rc < 0) {
+		const char *detail = p_rose_last_error ? p_rose_last_error() : NULL;
+		if (detail && detail[0]) {
+			PyErr_SetString(PyExc_RuntimeError, detail);
+		} else {
+			PyErr_Format(PyExc_RuntimeError, "rose_readlast failed: %lld", (long long)rc);
+		}
+		return NULL;
 	}
 
 	/* Return data_length */
@@ -770,6 +798,7 @@ PyInit__ros3(void) {
 	if (load_symbol(lib_handle, "rose_create_node", (void **)&p_rose_create_node) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_shutdown", (void **)&p_rose_shutdown) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_ok", (void **)&p_rose_ok) < 0) return NULL;
+	if (load_symbol(lib_handle, "rose_last_error", (void **)&p_rose_last_error) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_create_pub", (void **)&p_rose_create_pub) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_create_sub", (void **)&p_rose_create_sub) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_delete_subscriber", (void **)&p_rose_delete_subscriber) < 0) return NULL;

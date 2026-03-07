@@ -87,6 +87,11 @@ typedef enum {
 	ROSE_ERR_BADINPUT = -8
 } ROSE_RES;
 
+// Thread-local details for the most recent library error on the calling thread.
+const char *rose_last_error(void);
+
+i64 rose_last_error_code(void);
+
 // Registration message types
 #define ROSE_MSG_NODE_START "NodeStart"
 #define ROSE_MSG_PUB_REGISTER "PubRegister"
