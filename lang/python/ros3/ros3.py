@@ -62,7 +62,7 @@ class Node:
         """Check if the node should continue running.
 
         Call this regularly in your main loop. It also sends heartbeats
-        to rosemaster (rate-limited internally).
+        to rosecore (rate-limited internally).
         """
         return _c.ok(self._capsule)
 

@@ -6,21 +6,21 @@ CXX ?= g++
 SCDOC ?= scdoc
 
 BUILD_DIR := build
-INSTALL_DIR ?= install
+PREFIX ?= /usr/local
+DESTDIR ?=
 VERSION ?= 1.0.0
-PC_PREFIX ?= /usr/local
 
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
 	-fno-stack-protector -D_FORTIFY_SOURCE=0 \
-	-Iinclude -O3 -mtune=native
+	-Iinclude -I$(PREFIX)/include -O3 -mtune=native
 CFLAGS_LTO := $(CFLAGS_BASE) -flto
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
 CFLAGS_SO := $(CFLAGS_BASE)
 
 CEXE := -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
 LDFLAGS := -fuse-ld=lld
-CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude -O3 -mtune=native
+CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude -I$(PREFIX)/include -O3 -mtune=native
 
 SOURCE := src/ros3.c
 HEADER := include/ros3.h
@@ -29,7 +29,7 @@ PC_FILE := $(BUILD_DIR)/ros3.pc
 
 LIB_TARGETS := $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a
 BIN_TARGETS := \
-	$(BUILD_DIR)/rosemaster \
+	$(BUILD_DIR)/rosecore \
 	$(BUILD_DIR)/rosenode \
 	$(BUILD_DIR)/rosetopic \
 	$(BUILD_DIR)/rosenet_tx \
@@ -43,19 +43,22 @@ TEST_TARGETS := \
 	$(BUILD_DIR)/test_cpp_subscriber
 ALL_EXECUTABLES := $(BIN_TARGETS) $(TEST_TARGETS)
 
-MAN_PAGES := rosemaster.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
+MAN_PAGES := rosecore.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
 DOC_SOURCE_DIR := docs/man/man1
 DOC_BUILD_DIR := $(BUILD_DIR)/docs/man/man1
 DOC_BUILD_TARGETS := $(addprefix $(DOC_BUILD_DIR)/,$(MAN_PAGES))
 WEBDOC_SCRIPT := docs/web/build.sh
 WEBDOC_SOURCES := $(WEBDOC_SCRIPT) docs/web/index.html docs/web/logo.svg $(wildcard docs/web/pages/*.md)
 
-BIN_INSTALL_DIR := $(INSTALL_DIR)/bin
-LIB_INSTALL_DIR := $(INSTALL_DIR)/lib
-INCLUDE_INSTALL_DIR := $(INSTALL_DIR)/include
+DEP_SHARED_LIBS := -L$(PREFIX)/lib -Wl,-rpath,$(PREFIX)/lib -lmirage -lquicksand
+DEP_STATIC_LIBS := $(PREFIX)/lib/libmirage.a $(PREFIX)/lib/libquicksand.a
+
+BIN_INSTALL_DIR := $(DESTDIR)$(PREFIX)/bin
+LIB_INSTALL_DIR := $(DESTDIR)$(PREFIX)/lib
+INCLUDE_INSTALL_DIR := $(DESTDIR)$(PREFIX)/include
 PKGCONFIG_INSTALL_DIR := $(LIB_INSTALL_DIR)/pkgconfig
-DOC_INSTALL_DIR := $(INSTALL_DIR)/share/man/man1
-COMPLETION_INSTALL_DIR := $(INSTALL_DIR)/share/bash-completion/completions
+DOC_INSTALL_DIR := $(DESTDIR)$(PREFIX)/share/man/man1
+COMPLETION_INSTALL_DIR := $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 
 ifeq ($(ARCH),x86_64)
 	CFLAGS_BASE += -march=native
@@ -75,7 +78,7 @@ endif
 all: $(LIB_TARGETS) $(ALL_EXECUTABLES)
 
 $(BUILD_DIR)/libros3.so: $(BUILD_DIR)/ros3_so.o
-	$(CC) -shared -o $@ $< $(LDFLAGS) -L/usr/local/lib -lmirage -lquicksand
+	$(CC) -shared -o $@ $< $(LDFLAGS) $(DEP_SHARED_LIBS)
 
 $(BUILD_DIR)/libros3.a: $(BUILD_DIR)/ros3_lto.o
 	$(AR) rcs $@ $<
@@ -96,37 +99,37 @@ $(BUILD_DIR)/ros3_gcc_lto.o: $(SOURCE)
 	$(GCC) -c $(CFLAGS_GCC_LTO) $< -o $@
 
 $(BUILD_DIR)/test: cmd/test/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosemaster: cmd/rosemaster/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosecore: cmd/rosecore/main+posix.c cmd/rosecore/core.c cmd/rosecore/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosecore/main+posix.c cmd/rosecore/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosenode: cmd/rosenode/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosenode: cmd/rosenode/main+posix.c cmd/rosenode/core.c cmd/rosenode/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenode/main+posix.c cmd/rosenode/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosetopic: cmd/rosetopic/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosetopic: cmd/rosetopic/main+posix.c cmd/rosetopic/core.c cmd/rosetopic/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosetopic/main+posix.c cmd/rosetopic/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosenet_tx: cmd/rosenet_tx/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosenet_tx: cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c cmd/rosenet_tx/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosenet_rx: cmd/rosenet_rx/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/rosenet_rx: cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c cmd/rosenet_rx/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/roseserial: cmd/roseserial/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+$(BUILD_DIR)/roseserial: cmd/roseserial/main+posix.c cmd/roseserial/core.c cmd/roseserial/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/roseserial/main+posix.c cmd/roseserial/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/test_net_pub: cmd/test_net_pub/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/test_net_sub: cmd/test_net_sub/main.c $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a -L/usr/local/lib -lmirage -lquicksand
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/test_cpp_publisher: test/cpp/publisher.cpp $(BUILD_DIR)/libros3_gcc_lto.a
-	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
+	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/test_cpp_subscriber: test/cpp/subscriber.cpp $(BUILD_DIR)/libros3_gcc_lto.a
-	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a -L/usr/local/lib -lmirage -lquicksand
+	$(CXX) $(CXXFLAGS) -o $@ $< $(BUILD_DIR)/libros3_gcc_lto.a $(DEP_STATIC_LIBS)
 
 $(DOC_BUILD_DIR)/%.1: $(DOC_SOURCE_DIR)/%.1.scd
 	mkdir -p $(DOC_BUILD_DIR)
@@ -140,7 +143,7 @@ webdocs: $(WEBDOC_SOURCES)
 $(PC_FILE): Makefile
 	mkdir -p $(BUILD_DIR)
 	{ \
-		echo "prefix=$(PC_PREFIX)"; \
+		echo "prefix=$(PREFIX)"; \
 		echo 'exec_prefix=$${prefix}'; \
 		echo 'libdir=$${exec_prefix}/lib'; \
 		echo 'includedir=$${prefix}/include'; \
@@ -159,7 +162,6 @@ check: $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/t
 
 install-bin: $(BIN_TARGETS)
 	mkdir -p $(BIN_INSTALL_DIR) $(COMPLETION_INSTALL_DIR)
-	rm -f $(INSTALL_DIR)/completions/bash/ros3.bash
 	install -m 0755 $(BIN_TARGETS) $(BIN_INSTALL_DIR)/
 	install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/ros3.bash
 
@@ -176,9 +178,8 @@ install-lib: $(LIB_TARGETS) $(PC_FILE)
 install: install-lib install-bin install-docs
 
 uninstall-bin:
-	rm -f $(BIN_INSTALL_DIR)/rosemaster $(BIN_INSTALL_DIR)/rosenode $(BIN_INSTALL_DIR)/rosetopic
+	rm -f $(BIN_INSTALL_DIR)/rosecore $(BIN_INSTALL_DIR)/rosenode $(BIN_INSTALL_DIR)/rosetopic
 	rm -f $(BIN_INSTALL_DIR)/rosenet_tx $(BIN_INSTALL_DIR)/rosenet_rx $(BIN_INSTALL_DIR)/roseserial
-	rm -f $(INSTALL_DIR)/completions/bash/ros3.bash
 	rm -f $(COMPLETION_INSTALL_DIR)/ros3.bash
 
 uninstall-docs:
@@ -203,7 +204,7 @@ python: $(BUILD_DIR)/libros3.so
 check-python: $(BUILD_DIR)/libros3.so
 	cd lang/python && pip install --break-system-packages -e . && cd ../.. && python3 test/python/test_pubsub.py
 
-check-cpp: $(BUILD_DIR)/rosemaster $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
+check-cpp: $(BUILD_DIR)/rosecore $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
 	./test_cpp.sh
 
 .PHONY: all check clean docs webdocs \

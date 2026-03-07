@@ -9,6 +9,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#include "core.h"
 #include "ros3.h"
 
 #include <errno.h>
@@ -18,6 +19,18 @@
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+static int is_help_arg(const char *arg) {
+	return strcmp(arg, "-h") == 0
+	    || strcmp(arg, "--help") == 0
+	    || strcmp(arg, "/h") == 0
+	    || strcmp(arg, "/help") == 0
+	    || strcmp(arg, "/?") == 0;
+}
+
+static int is_pid_flag(const char *arg) {
+	return strcmp(arg, "--pid") == 0 || strcmp(arg, "/pid") == 0;
+}
 
 static void print_usage(void) {
 	fprintf(stderr, "Usage: rosenode <command> [args...]\n");
@@ -62,7 +75,7 @@ static int get_query_poll_step_ms(int timeout_ms) {
 // Build query topic name using rose_topic_to_shm helper
 static void build_topic_name(char *buf, size_t buf_size, const char *suffix) {
 	char topic[256];
-	snprintf(topic, sizeof(topic), "rosemaster_%s", suffix);
+	snprintf(topic, sizeof(topic), "rosecore_%s", suffix);
 	rose_topic_to_shm(buf, buf_size, topic);
 }
 
@@ -332,17 +345,19 @@ static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
 	mirage_destroy(&msg, NULL);
 }
 
-int main(int argc, char **argv) {
+int rosenode_main(int argc, char **argv) {
 	if(argc < 2) {
 		print_usage();
 		return 1;
 	}
-
-	if(rose_set_pdeathsig(SIGTERM) != 0) {
-		perror("[rosenode] prctl(PR_SET_PDEATHSIG)");
+	if(is_help_arg(argv[1])) {
+		print_usage();
+		return 0;
 	}
 
-	const char *cmd = argv[1];
+	(void) rose_set_pdeathsig(SIGTERM);
+
+	const char *cmd = argv[1][0] == '/' ? argv[1] + 1 : argv[1];
 
 	// Determine which topic to use
 	char topic[512];
@@ -377,7 +392,7 @@ int main(int argc, char **argv) {
 		}
 
 		skip_to_latest(conn);
-		if(strcmp(argv[2], "--pid") == 0) {
+		if(is_pid_flag(argv[2])) {
 			if(argc < 4) {
 				print_usage();
 				return 1;

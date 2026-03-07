@@ -1,0 +1,64 @@
+# ROS3 Windows build graph (MinGW + Ninja)
+# Primary entrypoint on Windows:
+#   ninja -f build_windows.ninja
+# Uses PREFIX as the install/dependency root (default /usr/local).
+
+default_cc = x86_64-w64-mingw32-gcc
+default_ar = x86_64-w64-mingw32-ar
+
+builddir = build/windows
+cflags = -Wall -Wextra -Wpedantic -std=c11 -O2 -Iinclude
+
+rule cc
+  command = deps_inc=$${PREFIX:-/usr/local}/include && compiler=$${CC:-$default_cc} && mkdir -p $builddir && $$compiler -c $cflags -I$$deps_inc $in -o $out
+  description = CC $out
+
+rule link_dll
+  command = deps_inc=$${PREFIX:-/usr/local}/include deps_lib=$${PREFIX:-/usr/local}/lib compiler=$${CC:-$default_cc} && mkdir -p $builddir && $$compiler -shared -I$$deps_inc -o $out $in -L$$deps_lib -lmirage -lquicksand -lws2_32
+  description = DLL $out
+
+rule ar
+  command = archiver=$${AR:-$default_ar} && mkdir -p $builddir && $$archiver rcs $out $in
+  description = AR $out
+
+rule link_exe
+  command = deps_inc=$${PREFIX:-/usr/local}/include deps_lib=$${PREFIX:-/usr/local}/lib compiler=$${CC:-$default_cc} && mkdir -p $builddir && $$compiler -I$$deps_inc -o $out $in $lib $$deps_lib/libmirage.a $$deps_lib/libquicksand.a -lws2_32
+  description = EXE $out
+
+rule copy
+  command = prefix=$${PREFIX:-/usr/local}; mkdir -p $$(dirname "$$prefix/$out") && cp $in "$$prefix/$out"
+  description = COPY $out
+
+build $builddir/ros3.o: cc src/ros3.c
+build $builddir/libros3.a: ar $builddir/ros3.o
+build $builddir/libros3.dll: link_dll $builddir/ros3.o
+
+build $builddir/rosecore.exe: link_exe cmd/rosecore/main+windows.c
+  lib = $builddir/libros3.a
+build $builddir/rosenode.exe: link_exe cmd/rosenode/main+windows.c
+  lib = $builddir/libros3.a
+build $builddir/rosetopic.exe: link_exe cmd/rosetopic/main+windows.c
+  lib = $builddir/libros3.a
+build $builddir/rosenet_tx.exe: link_exe cmd/rosenet_tx/main+windows.c
+  lib = $builddir/libros3.a
+build $builddir/rosenet_rx.exe: link_exe cmd/rosenet_rx/main+windows.c
+  lib = $builddir/libros3.a
+build $builddir/roseserial.exe: link_exe cmd/roseserial/main+windows.c
+  lib = $builddir/libros3.a
+
+build bin/rosecore.exe: copy $builddir/rosecore.exe
+build bin/rosenode.exe: copy $builddir/rosenode.exe
+build bin/rosetopic.exe: copy $builddir/rosetopic.exe
+build bin/rosenet_tx.exe: copy $builddir/rosenet_tx.exe
+build bin/rosenet_rx.exe: copy $builddir/rosenet_rx.exe
+build bin/roseserial.exe: copy $builddir/roseserial.exe
+build lib/libros3.a: copy $builddir/libros3.a
+build lib/libros3.dll: copy $builddir/libros3.dll
+build include/ros3.h: copy include/ros3.h
+
+build all: phony $builddir/libros3.a $builddir/rosecore.exe $builddir/rosenode.exe $builddir/rosetopic.exe $builddir/rosenet_tx.exe $builddir/rosenet_rx.exe $builddir/roseserial.exe
+# Requires MinGW-built mirage/quicksand libraries in link path.
+build dll: phony $builddir/libros3.dll
+build install: phony bin/rosecore.exe bin/rosenode.exe bin/rosetopic.exe bin/rosenet_tx.exe bin/rosenet_rx.exe bin/roseserial.exe lib/libros3.a lib/libros3.dll include/ros3.h
+
+default all

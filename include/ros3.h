@@ -66,7 +66,7 @@ struct rose_node {
 	rose_subscriber *subs;
 	uint64_t subs_length;
 
-	rose_publisher rosemaster_pub;
+	rose_publisher rosecore_pub;
 	rose_subscriber control_sub;
 	rose_publisher param_pub;
 	rose_subscriber param_sub;
@@ -101,8 +101,8 @@ typedef enum {
 #define ROSE_MSG_DONE "Done"
 
 // Query topic suffixes (appended to ROSE_BASE)
-#define ROSE_TOPIC_DUMP "rosemaster_dump"
-#define ROSE_TOPIC_LOOKUP "rosemaster_lookup"
+#define ROSE_TOPIC_DUMP "rosecore_dump"
+#define ROSE_TOPIC_LOOKUP "rosecore_lookup"
 
 // Query sizing constants
 #define ROSE_QUERY_MSG_SIZE 33024 // (64+64)*256 + 256
@@ -197,7 +197,7 @@ void rose_sleep_rate(f64 hz);
 // Returns pointer to shm buffer for convenience.
 char *rose_topic_to_shm(char *shm, size_t shm_size, const char *topic);
 
-// Ensure this process receives SIGTERM if its parent exits.
+// Configure parent-death signal behavior (currently optional/no-op on some OSes).
 int rose_set_pdeathsig(int sig);
 
 #ifdef __cplusplus

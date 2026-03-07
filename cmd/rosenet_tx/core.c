@@ -3,6 +3,7 @@
 // Usage: rosenet_tx <topic> <host> <port> [--udp]
 //        rosenet_tx --topic <t> --host <h> --port <p> [--udp] [--message_size N] [--read_last 0|1]
 
+#include "core.h"
 #include "ros3.h"
 
 #include <arpa/inet.h>
@@ -18,16 +19,46 @@
 
 // --- CLI helpers -------------------------------------------------------------
 
+static int is_help_arg(const char *arg) {
+	return strcmp(arg, "-h") == 0
+	    || strcmp(arg, "--help") == 0
+	    || strcmp(arg, "/h") == 0
+	    || strcmp(arg, "/help") == 0
+	    || strcmp(arg, "/?") == 0;
+}
+
+static int is_option_token(const char *arg) {
+	return arg && (arg[0] == '-' || arg[0] == '/');
+}
+
+static int arg_is(const char *arg, const char *name) {
+	if(strcmp(arg, name) == 0) {
+		return 1;
+	}
+	if(name[0] == '-' && name[1] == '-') {
+		char dos_name[64];
+		snprintf(dos_name, sizeof(dos_name), "/%s", name + 2);
+		return strcmp(arg, dos_name) == 0;
+	}
+	return 0;
+}
+
+static void print_usage(const char *argv0) {
+	fprintf(stderr, "Usage: %s <topic> <host> <port> [--udp]\n", argv0);
+	fprintf(stderr, "       %s --topic T --host H --port P [--udp] [--message_size N] [--read_last 0|1]\n", argv0);
+	fprintf(stderr, "       %s /topic T /host H /port P [/udp] [/message_size N] [/read_last 0|1]\n", argv0);
+}
+
 static const char *find_arg(int argc, char **argv, const char *name, const char *fallback) {
 	for(int i = 1; i + 1 < argc; ++i) {
-		if(strcmp(argv[i], name) == 0) return argv[i + 1];
+		if(arg_is(argv[i], name)) return argv[i + 1];
 	}
 	return fallback;
 }
 
 static int has_flag(int argc, char **argv, const char *flag) {
 	for(int i = 1; i < argc; ++i) {
-		if(strcmp(argv[i], flag) == 0) return 1;
+		if(arg_is(argv[i], flag)) return 1;
 	}
 	return 0;
 }
@@ -67,7 +98,12 @@ static int send_frame(int fd, const void *data, u32 len) {
 
 // --- Main --------------------------------------------------------------------
 
-int main(int argc, char **argv) {
+int rosenet_tx_main(int argc, char **argv) {
+	if(argc > 1 && is_help_arg(argv[1])) {
+		print_usage(argv[0]);
+		return 0;
+	}
+
 	signal(SIGPIPE, SIG_IGN);
 
 	// Named args take priority over positional
@@ -79,14 +115,13 @@ int main(int argc, char **argv) {
 	i64 read_last = find_arg_i64(argc, argv, "--read_last", 0);
 
 	// Fall back to positional: <topic> <host> <port> [--udp]
-	if(!topic && argc >= 2 && argv[1][0] != '-') topic = argv[1];
-	if(!host && argc >= 3 && argv[2][0] != '-') host = argv[2];
-	if(port < 0 && argc >= 4 && argv[3][0] != '-') port = atoi(argv[3]);
-	if(!use_udp && argc > 4 && strcmp(argv[4], "--udp") == 0) use_udp = 1;
+	if(!topic && argc >= 2 && !is_option_token(argv[1])) topic = argv[1];
+	if(!host && argc >= 3 && !is_option_token(argv[2])) host = argv[2];
+	if(port < 0 && argc >= 4 && !is_option_token(argv[3])) port = atoi(argv[3]);
+	if(!use_udp && argc > 4 && arg_is(argv[4], "--udp")) use_udp = 1;
 
 	if(!topic || !host || port < 0) {
-		fprintf(stderr, "Usage: %s <topic> <host> <port> [--udp]\n", argv[0]);
-		fprintf(stderr, "       %s --topic T --host H --port P [--udp] [--message_size N] [--read_last 0|1]\n", argv[0]);
+		print_usage(argv[0]);
 		return 1;
 	}
 

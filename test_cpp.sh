@@ -26,10 +26,10 @@ export ROSE_BASE="test_cpp"
 # Clean stale shared memory from previous runs.
 rm -f "/dev/shm/${ROSE_BASE}%"* 2>/dev/null || true
 
-"$BUILD_DIR/rosemaster" >/dev/null 2>&1 &
+"$BUILD_DIR/rosecore" >/dev/null 2>&1 &
 MASTER_PID=$!
 
-# Let rosemaster create core topics before starting test nodes.
+# Let rosecore create core topics before starting test nodes.
 sleep 0.6
 
 TOPIC="cpp_chatter"

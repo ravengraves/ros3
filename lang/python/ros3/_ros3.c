@@ -1,8 +1,8 @@
-/*  ros3/_ros3.c - thin C wrapper for libros3.so
+/*  ros3/_ros3.c - thin C wrapper for ros3 shared libraries
  *
  *  Purpose
  *  --------
- *  - Load the symbols from libros3.so at import time
+ *  - Load symbols from platform-appropriate shared libraries at import time
  *  - Expose those functions to Python with proper argument/return conversion
  *  - Provide low-level primitives for the high-level Python API
  *
@@ -15,17 +15,79 @@
 #define PY_SSIZE_T_CLEAN
 
 #include <Python.h>
-#include <dlfcn.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+typedef HMODULE dynlib_handle;
+#define DYNLIB_FLAG_NOW 0
+#define DYNLIB_FLAG_GLOBAL 0
+
+static const char *dynlib_error_string(void) {
+	static char buf[256];
+	DWORD err = GetLastError();
+	if(err == 0) {
+		return "unknown error";
+	}
+	DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM
+				 | FORMAT_MESSAGE_IGNORE_INSERTS,
+				 NULL,
+				 err,
+				 0,
+				 buf,
+				 (DWORD) sizeof(buf),
+				 NULL);
+	if(n == 0) {
+		snprintf(buf, sizeof(buf), "Windows error %lu",
+			 (unsigned long) err);
+	} else {
+		while(n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
+			buf[n - 1] = '\0';
+			n -= 1;
+		}
+	}
+	return buf;
+}
+
+static dynlib_handle dynlib_open(const char *name, int flags) {
+	(void) flags;
+	SetLastError(0);
+	return LoadLibraryA(name);
+}
+
+static void *dynlib_symbol(dynlib_handle handle, const char *sym) {
+	SetLastError(0);
+	return (void *) GetProcAddress(handle, sym);
+}
+#else
+#include <dlfcn.h>
+typedef void *dynlib_handle;
+#define DYNLIB_FLAG_NOW RTLD_NOW
+#define DYNLIB_FLAG_GLOBAL RTLD_GLOBAL
+
+static const char *dynlib_error_string(void) {
+	const char *err = dlerror();
+	return err ? err : "unknown error";
+}
+
+static dynlib_handle dynlib_open(const char *name, int flags) {
+	return dlopen(name, flags);
+}
+
+static void *dynlib_symbol(dynlib_handle handle, const char *sym) {
+	return dlsym(handle, sym);
+}
+#endif
+
 #include "ros3.h"
 
 /* ---------------- 1.  symbol pointers -------------------------------------- */
 
-static void *lib_handle = NULL;
+static dynlib_handle lib_handle = NULL;
 
 /* Node management */
 static rose_node *(*p_rose_init)(char, char **, char *,
@@ -71,13 +133,79 @@ static void (*p_mirage_destroy)(mirage_msg **, void (*)(void *)) = NULL;
 
 /* ------------------------ 2.  load a single symbol ------------------------- */
 
+#if defined(_WIN32)
+static const char *const MIRAGE_LIBRARY_CANDIDATES[] = {
+	"mirage.dll",
+	"libmirage.dll",
+};
+static const char *const QUICKSAND_LIBRARY_CANDIDATES[] = {
+	"quicksand.dll",
+	"libquicksand.dll",
+};
+static const char *const ROS3_LIBRARY_CANDIDATES[] = {
+	"ros3.dll",
+	"libros3.dll",
+};
+#elif defined(__APPLE__)
+static const char *const MIRAGE_LIBRARY_CANDIDATES[] = {
+	"libmirage.dylib",
+	"libmirage.so",
+};
+static const char *const QUICKSAND_LIBRARY_CANDIDATES[] = {
+	"libquicksand.dylib",
+	"libquicksand.so",
+};
+static const char *const ROS3_LIBRARY_CANDIDATES[] = {
+	"libros3.dylib",
+	"libros3.so",
+};
+#else
+static const char *const MIRAGE_LIBRARY_CANDIDATES[] = {
+	"libmirage.so",
+	"libmirage.dylib",
+};
+static const char *const QUICKSAND_LIBRARY_CANDIDATES[] = {
+	"libquicksand.so",
+	"libquicksand.dylib",
+};
+static const char *const ROS3_LIBRARY_CANDIDATES[] = {
+	"libros3.so",
+	"libros3.dylib",
+};
+#endif
+
+static dynlib_handle
+load_library_candidates(const char *logical_name, const char *const *candidates,
+			size_t candidate_count, int flags) {
+	char attempts[1024] = {0};
+	for(size_t i = 0; i < candidate_count; ++i) {
+		dynlib_handle handle = dynlib_open(candidates[i], flags);
+		if(handle) {
+			return handle;
+		}
+
+		const char *err = dynlib_error_string();
+		size_t used = strlen(attempts);
+		if(used < sizeof(attempts) - 1) {
+			snprintf(attempts + used, sizeof(attempts) - used, "%s%s (%s)",
+				 used ? "; " : "", candidates[i], err);
+		}
+	}
+
+	PyErr_Format(PyExc_RuntimeError,
+		     "Failed to load shared library for %s. Tried: %s",
+		     logical_name,
+		     attempts[0] ? attempts : "(none)");
+	return NULL;
+}
+
 static int
-load_symbol(void *handle, const char *sym, void **ptr) {
-	void *addr = dlsym(handle, sym);
+load_symbol(dynlib_handle handle, const char *sym, void **ptr) {
+	void *addr = dynlib_symbol(handle, sym);
 	if (!addr) {
 		PyErr_Format(PyExc_RuntimeError,
 		             "Failed to load symbol %s: %s",
-		             sym, dlerror());
+		             sym, dynlib_error_string());
 		return -1;
 	}
 	*ptr = addr;
@@ -584,7 +712,7 @@ static PyMethodDef Ros3Methods[] = {
 static struct PyModuleDef ros3module = {
     PyModuleDef_HEAD_INIT,
     "ros3._ros3",
-    "Thin C wrapper for libros3.so",
+    "Thin C wrapper for ros3 shared library",
     -1,
     Ros3Methods,
     NULL,
@@ -602,36 +730,39 @@ PyInit__ros3(void) {
 	}
 
 	/*
-	 * IMPORTANT: Load libraries with RTLD_GLOBAL so that when ros3 calls
-	 * quicksand functions internally, those symbols are visible.
+	 * IMPORTANT: Load dependency libraries with global symbol visibility
+	 * so that when ros3 calls quicksand/mirage functions internally,
+	 * those symbols are visible.
 	 * Load in dependency order: mirage, quicksand, then ros3.
 	 */
 
 	/* Load mirage first (no dependencies) */
-	void *mirage_handle = dlopen("libmirage.so", RTLD_NOW | RTLD_GLOBAL);
+	dynlib_handle mirage_handle =
+		load_library_candidates("mirage",
+					MIRAGE_LIBRARY_CANDIDATES,
+					sizeof(MIRAGE_LIBRARY_CANDIDATES) / sizeof(MIRAGE_LIBRARY_CANDIDATES[0]),
+					DYNLIB_FLAG_NOW | DYNLIB_FLAG_GLOBAL);
 	if (!mirage_handle) {
-		PyErr_Format(PyExc_RuntimeError,
-		             "Failed to load shared library libmirage.so: %s",
-		             dlerror());
 		return NULL;
 	}
 
 	/* Load quicksand second (depends on mirage) */
-	void *quicksand_handle = dlopen("libquicksand.so", RTLD_NOW | RTLD_GLOBAL);
+	dynlib_handle quicksand_handle =
+		load_library_candidates("quicksand",
+					QUICKSAND_LIBRARY_CANDIDATES,
+					sizeof(QUICKSAND_LIBRARY_CANDIDATES) / sizeof(QUICKSAND_LIBRARY_CANDIDATES[0]),
+					DYNLIB_FLAG_NOW | DYNLIB_FLAG_GLOBAL);
 	if (!quicksand_handle) {
-		PyErr_Format(PyExc_RuntimeError,
-		             "Failed to load shared library libquicksand.so: %s",
-		             dlerror());
 		return NULL;
 	}
 	(void)quicksand_handle;  /* We just need it loaded globally */
 
 	/* Load ros3 last (depends on mirage and quicksand) */
-	lib_handle = dlopen("libros3.so", RTLD_NOW | RTLD_GLOBAL);
+	lib_handle = load_library_candidates("ros3",
+					     ROS3_LIBRARY_CANDIDATES,
+					     sizeof(ROS3_LIBRARY_CANDIDATES) / sizeof(ROS3_LIBRARY_CANDIDATES[0]),
+					     DYNLIB_FLAG_NOW | DYNLIB_FLAG_GLOBAL);
 	if (!lib_handle) {
-		PyErr_Format(PyExc_RuntimeError,
-		             "Failed to load shared library libros3.so: %s",
-		             dlerror());
 		return NULL;
 	}
 

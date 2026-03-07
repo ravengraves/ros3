@@ -3,6 +3,7 @@
 #endif
 
 #include "ros3.h"
+#include "ros3_platform.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -11,11 +12,12 @@
 #include <stdio.h>    /* snprintf */
 #include <stdlib.h>   /* malloc, free */
 #include <string.h>   /* strlen, strcpy, memcpy */
-#include <sys/types.h>/* pid_t */
-#if defined(__linux__)
-#include <sys/prctl.h>
+
+#if defined(_WIN32)
+#include "ros3_platform_windows.c"
+#else
+#include "ros3_platform_posix.c"
 #endif
-#include <unistd.h>   /* getpid */
 
 
 #define REMAP_SIZE 4096			 // at most 4kb of remap strings
@@ -25,13 +27,13 @@
 
 static rose_node *ROSE_STATIC_NODE = NULL;
 
-// Send a registration message to rosemaster
+// Send a registration message to rosecore
 // msg_type: ROSE_MSG_NODE_START, ROSE_MSG_PUB_REGISTER, ROSE_MSG_SUB_REGISTER, ROSE_MSG_HEARTBEAT
 // For NodeStart/Heartbeat: arg2 is NULL, pid is sent as i64
 // For PubRegister/SubRegister: arg2 is the topic name
 static void _rose_send_registration(rose_node *n, char *msg_type,
 				    char *arg2, i64 arg2_len) {
-	if(!n || !n->rosemaster_pub.pub) {
+	if(!n || !n->rosecore_pub.pub) {
 		return;
 	}
 
@@ -49,12 +51,12 @@ static void _rose_send_registration(rose_node *n, char *msg_type,
 	if(strcmp(msg_type, ROSE_MSG_NODE_START) == 0) {
 		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 2);
 		err |= mirage_write_string(m, n->name, n->name_length);
-		err |= mirage_write_i64(m, (i64) getpid());
+		err |= mirage_write_i64(m, rose_platform_getpid());
 	} else if(strcmp(msg_type, ROSE_MSG_HEARTBEAT) == 0) {
 		i64 now = (i64) quicksand_now();
 		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 3);
 		err |= mirage_write_string(m, n->name, n->name_length);
-		err |= mirage_write_i64(m, (i64) getpid());
+		err |= mirage_write_i64(m, rose_platform_getpid());
 		err |= mirage_write_i64(m, now);
 	} else {
 		// PubRegister or SubRegister
@@ -64,13 +66,13 @@ static void _rose_send_registration(rose_node *n, char *msg_type,
 	}
 
 	if(err >= 0) {
-		quicksand_write(n->rosemaster_pub.pub, m->data, m->cursor);
+		quicksand_write(n->rosecore_pub.pub, m->data, m->cursor);
 	}
 }
 
 // Send rate-limited heartbeat (max 1kHz)
 static void _rose_send_heartbeat(rose_node *n) {
-	if(!n || !n->rosemaster_pub.pub) {
+	if(!n || !n->rosecore_pub.pub) {
 		return;
 	}
 
@@ -141,13 +143,7 @@ void _rose_signal_shutdown(int sig) {
 }
 
 int rose_set_pdeathsig(int sig) {
-#if defined(__linux__)
-	return prctl(PR_SET_PDEATHSIG, (long) sig);
-#else
-	(void) sig;
-	errno = ENOSYS;
-	return -1;
-#endif
+	return rose_platform_set_parent_death_signal(sig);
 }
 
 rose_node *rose_init(char argc, char **argv, char *name_in,
@@ -161,10 +157,7 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 		deallocate = (void (*)(void *)) dealloc;
 	}
 
-	if(rose_set_pdeathsig(SIGTERM) != 0) {
-		fprintf(stderr, "rose_init: failed to set parent death signal: %s\n",
-			strerror(errno));
-	}
+	(void) rose_set_pdeathsig(SIGTERM);
 
 	char *remaps = allocate(REMAP_SIZE);
 	u64 *remap_lens = allocate(REMAP_COUNT * 2); // lengths
@@ -236,9 +229,7 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 	}
 
 	atexit(_rose_shutdown);
-	signal(SIGINT, _rose_signal_shutdown);
-	signal(SIGTERM, _rose_signal_shutdown);
-	signal(SIGABRT, _rose_signal_shutdown);
+	rose_platform_install_shutdown_handlers(_rose_signal_shutdown);
 
 	return rose_create_node(name,
 				(i64) strlen(name),
@@ -329,7 +320,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	assert(strchr(in_name, '/') == NULL && "Error: Node name should not contain '/'");
 	char *name = rose_alloc(n, name_len + 64);
 	memcpy(name, in_name, (size_t) name_len);
-	sprintf(name + name_len, "-%d", (int) getpid());
+	sprintf(name + name_len, "-%d", (int) rose_platform_getpid());
 	n->name = name;
 	n->name_length = strlen(name);
 
@@ -367,12 +358,12 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	i64 res = 0;
 	memcpy(topic, prefix, base_prefix_len); // base_prefix
 
-	sprintf(topic + base_prefix_len, "%s", "rosemaster");
+	sprintf(topic + base_prefix_len, "%s", "rosecore");
 	for(res = -1; res != 0;) {
-		res = quicksand_connect(&n->rosemaster_pub.pub, topic, -1, 512, 8192, 0);
+		res = quicksand_connect(&n->rosecore_pub.pub, topic, -1, 512, 8192, 0);
 		if(res != 0) rose_sleep(1e-3);
 	}
-	n->rosemaster_pub.node = n;
+	n->rosecore_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
 	for(res = -1; res != 0;) {
@@ -414,7 +405,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	// Initialize heartbeat timestamp
 	n->last_heartbeat_ns = 0;
 
-	// Send NodeStart registration to rosemaster
+	// Send NodeStart registration to rosecore
 	_rose_send_registration(n, ROSE_MSG_NODE_START, NULL, 0);
 
 	return n;
@@ -483,7 +474,7 @@ rose_publisher *rose_create_pub(rose_node *n,
 
 	n->pubs_length += 1;
 
-	// Send PubRegister to rosemaster
+	// Send PubRegister to rosecore
 	_rose_send_registration(n, ROSE_MSG_PUB_REGISTER, topic, strlen(topic));
 
 	return pub;
@@ -526,7 +517,7 @@ rose_subscriber *rose_create_sub(rose_node *n,
 
 	n->subs_length += 1;
 
-	// Send SubRegister to rosemaster
+	// Send SubRegister to rosecore
 	_rose_send_registration(n, ROSE_MSG_SUB_REGISTER, topic, strlen(topic));
 
 	return sub;

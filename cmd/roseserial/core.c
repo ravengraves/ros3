@@ -5,6 +5,7 @@
 
 #define _GNU_SOURCE
 
+#include "core.h"
 #include "ros3.h"
 
 #include <errno.h>
@@ -15,6 +16,18 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+
+static int is_help_arg(const char *arg) {
+	return strcmp(arg, "-h") == 0
+	    || strcmp(arg, "--help") == 0
+	    || strcmp(arg, "/h") == 0
+	    || strcmp(arg, "/help") == 0
+	    || strcmp(arg, "/?") == 0;
+}
+
+static void print_usage(const char *argv0) {
+	fprintf(stderr, "Usage: %s <device> <rx_topic> <tx_topic> <baud> <msg_size> <slots>\n", argv0);
+}
 
 static speed_t baud_to_speed(int baud) {
 	switch(baud) {
@@ -60,9 +73,13 @@ static int serial_open(const char *device, int baud) {
 	return fd;
 }
 
-int main(int argc, char **argv) {
+int roseserial_main(int argc, char **argv) {
+	if(argc > 1 && is_help_arg(argv[1])) {
+		print_usage(argv[0]);
+		return 0;
+	}
 	if(argc < 7) {
-		fprintf(stderr, "Usage: %s <device> <rx_topic> <tx_topic> <baud> <msg_size> <slots>\n", argv[0]);
+		print_usage(argv[0]);
 		return 1;
 	}
 

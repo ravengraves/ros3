@@ -4,17 +4,26 @@
 //   rosetopic list              - List all topics
 //   rosetopic info <topic>      - Show publishers/subscribers for a topic
 //   rosetopic echo <topic>      - Subscribe and dump messages as hex
+//   rosetopic rm <topic>        - Unlink a topic shared-memory segment
 
 #define _POSIX_C_SOURCE 200809L
 
+#include "core.h"
 #include "ros3.h"
 
 #include <ctype.h>
-#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int is_help_arg(const char *arg) {
+	return strcmp(arg, "-h") == 0
+	    || strcmp(arg, "--help") == 0
+	    || strcmp(arg, "/h") == 0
+	    || strcmp(arg, "/help") == 0
+	    || strcmp(arg, "/?") == 0;
+}
 
 static volatile int running = 1;
 
@@ -30,6 +39,7 @@ static void print_usage(void) {
 	fprintf(stderr, "  list              - List all topics\n");
 	fprintf(stderr, "  info <topic>      - Show publishers/subscribers\n");
 	fprintf(stderr, "  echo <topic>      - Subscribe and dump hex\n");
+	fprintf(stderr, "  rm <topic>        - Unlink a topic shared-memory segment\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Environment:\n");
 	fprintf(stderr, "  ROSE_BASE  Namespace (default: 'rose')\n");
@@ -89,7 +99,7 @@ static void input_to_shm(char *out, size_t out_size, const char *input) {
 // Build query topic name using rose_topic_to_shm helper
 static void build_topic_name(char *buf, size_t buf_size, const char *suffix) {
 	char topic[256];
-	snprintf(topic, sizeof(topic), "rosemaster_%s", suffix);
+	snprintf(topic, sizeof(topic), "rosecore_%s", suffix);
 	rose_topic_to_shm(buf, buf_size, topic);
 }
 
@@ -401,7 +411,7 @@ static void hex_dump(const uint8_t *data, size_t len) {
 }
 
 // Subscribe to topic and dump messages as hex
-static void echo_topic(const char *topic_name) {
+static int echo_topic(const char *topic_name) {
 	// Convert topic name to shared memory format with ROSE_BASE
 	char shm_name[512];
 	rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name);
@@ -411,7 +421,7 @@ static void echo_topic(const char *topic_name) {
 	if(ret != 0) {
 		fprintf(stderr, "Failed to subscribe to %s (shm: %s)\n",
 			topic_name, shm_name);
-		return;
+		return 1;
 	}
 
 	printf("Subscribed to %s (Ctrl+C to stop)\n\n", topic_name);
@@ -419,7 +429,8 @@ static void echo_topic(const char *topic_name) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
-		return;
+		quicksand_disconnect(&sub, NULL);
+		return 1;
 	}
 
 	signal(SIGINT, handle_signal);
@@ -441,19 +452,32 @@ static void echo_topic(const char *topic_name) {
 
 	printf("\nStopped.\n");
 	mirage_destroy(&msg, NULL);
+	quicksand_disconnect(&sub, NULL);
+	return 0;
 }
 
-int main(int argc, char **argv) {
+static int remove_topic(const char *topic_name) {
+	char shm_name[512];
+	rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name);
+	quicksand_delete(shm_name, -1);
+
+	printf("Unlinked %s\n", topic_name);
+	return 0;
+}
+
+int rosetopic_main(int argc, char **argv) {
 	if(argc < 2) {
 		print_usage();
 		return 1;
 	}
-
-	if(rose_set_pdeathsig(SIGTERM) != 0) {
-		perror("[rosetopic] prctl(PR_SET_PDEATHSIG)");
+	if(is_help_arg(argv[1])) {
+		print_usage();
+		return 0;
 	}
 
-	const char *cmd = argv[1];
+	(void) rose_set_pdeathsig(SIGTERM);
+
+	const char *cmd = argv[1][0] == '/' ? argv[1] + 1 : argv[1];
 
 	if(strcmp(cmd, "list") == 0) {
 		char topic[512];
@@ -504,7 +528,15 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 
-		echo_topic(argv[2]);
+		return echo_topic(argv[2]);
+
+	} else if(strcmp(cmd, "rm") == 0) {
+		if(argc < 3) {
+			print_usage();
+			return 1;
+		}
+
+		return remove_topic(argv[2]);
 
 	} else {
 		print_usage();

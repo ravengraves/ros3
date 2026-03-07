@@ -61,7 +61,7 @@ _ros3_refresh_topics() {
     done < <(ROSE_QUERY_TIMEOUT_MS="$ROSE_COMPLETE_TIMEOUT_MS" rosetopic list 2>/dev/null)
 }
 
-_ros3_complete_rosemaster() {
+_ros3_complete_rosecore() {
     COMPREPLY=()
 }
 
@@ -119,12 +119,12 @@ _ros3_complete_rosetopic() {
     cmd="${COMP_WORDS[1]}"
 
     if (( COMP_CWORD == 1 )); then
-        _ros3_compgen "$cur" list info echo
+        _ros3_compgen "$cur" list info echo rm
         return 0
     fi
 
     case "$cmd" in
-        info|echo)
+        info|echo|rm)
             if (( COMP_CWORD == 2 )); then
                 _ros3_refresh_topics
                 _ros3_compgen "$cur" "${_ros3_comp_topics[@]}"
@@ -178,13 +178,13 @@ _ros3_complete_rosenet_rx() {
             _ros3_compgen "$cur" "${_ros3_comp_topics[@]}"
             return 0
             ;;
-        --port|--message_size|--queue_depth)
+        --port|--message_size|--message_rate)
             COMPREPLY=()
             return 0
             ;;
     esac
 
-    words=(--topic --port --udp --message_size --queue_depth)
+    words=(--topic --port --udp --message_size --message_rate)
     if (( COMP_CWORD == 1 )) && [[ "$cur" != -* ]]; then
         _ros3_refresh_topics
         words+=("${_ros3_comp_topics[@]}")
@@ -204,7 +204,7 @@ _ros3_complete_roseserial() {
     COMPREPLY=()
 }
 
-complete -F _ros3_complete_rosemaster rosemaster
+complete -F _ros3_complete_rosecore rosecore
 complete -F _ros3_complete_rosenode rosenode
 complete -F _ros3_complete_rosetopic rosetopic
 complete -F _ros3_complete_rosenet_tx rosenet_tx
