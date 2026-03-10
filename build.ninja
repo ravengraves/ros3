@@ -10,6 +10,8 @@ ar = llvm-ar
 gcc_ar = gcc-ar
 cxx = g++
 scdoc = scdoc
+clang_tidy = clang-tidy
+gcc_analyzer = gcc
 
 builddir = build
 version = 1.0.0
@@ -62,6 +64,16 @@ rule gen_pc
   command = prefix=$${PREFIX:-/usr/local} && mkdir -p $builddir && { echo "prefix=$$prefix"; echo 'exec_prefix=$${prefix}'; echo 'libdir=$${exec_prefix}/lib'; echo 'includedir=$${prefix}/include'; echo; echo "Name: ros3"; echo "Description: ROS3 (Rose) publisher/subscriber middleware"; echo "Version: $version"; echo 'Libs: -L$${libdir} -lros3'; echo 'Libs.private: -lmirage -lquicksand'; echo 'Cflags: -I$${includedir}'; } > $out
   description = GEN_PC $out
 
+rule gen_compdb
+  command = $ninja -f build.ninja -t compdb cc_so cc_lto cc_gcc_lto link_c link_cpp > $out
+  generator = 1
+
+rule delegate_make
+  command = make $target && touch $out
+  description = MAKE $target
+  pool = console
+  restat = 1
+
 rule run
   command = $cmd
   description = RUN $name
@@ -110,12 +122,28 @@ build $builddir/docs/man/man1/roseserial.1: scdoc docs/man/man1/roseserial.1.scd
 
 build $builddir/ros3.pc: gen_pc
 
-build .ninja-check.stamp: run FORCE | $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/test $builddir/rosenet_tx $builddir/rosenet_rx $builddir/test_net_pub $builddir/test_net_sub
-  cmd = ./test_utils.sh && ./test_net.sh && touch .ninja-check.stamp
-  name = check
+build compile_commands.json: gen_compdb build.ninja
+
+build .ninja-check.stamp: delegate_make FORCE
+  target = check
+
+build .ninja-tidy.stamp: delegate_make FORCE
+  target = tidy
+
+build .ninja-clang-analyze.stamp: delegate_make FORCE
+  target = clang-analyze
+
+build .ninja-fanalyzer.stamp: delegate_make FORCE
+  target = fanalyzer
+
+build .ninja-sanitize-check.stamp: delegate_make FORCE
+  target = sanitize-check
+
+build .ninja-analysis.stamp: delegate_make FORCE
+  target = analysis
 
 build .ninja-clean.stamp: run FORCE
-  cmd = mkdir -p $builddir && rm -rf $builddir/* && touch .ninja-clean.stamp
+  cmd = mkdir -p $builddir && rm -rf $builddir/* && rm -f compile_commands.json && touch .ninja-clean.stamp
   name = clean
 
 build .ninja-webdocs.stamp: run FORCE | docs/web/build.sh docs/web/index.html docs/web/logo.svg docs/web/pages/00-build-install.md docs/web/pages/01-project-setup.md docs/web/pages/02-pubsub-c.md docs/web/pages/03-pubsub-cpp.md docs/web/pages/04-pubsub-python.md docs/web/pages/05-tools.md docs/web/pages/06-roseserial.md docs/web/pages/07-multi-machine.md docs/web/pages/08-mirage-datatypes.md docs/web/pages/09-package-control-subtree.md
@@ -148,6 +176,11 @@ build .ninja-uninstall-lib.stamp: run FORCE
 
 build all: phony $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial $builddir/test $builddir/test_net_pub $builddir/test_net_sub $builddir/test_cpp_publisher $builddir/test_cpp_subscriber
 build check: phony .ninja-check.stamp
+build tidy: phony .ninja-tidy.stamp
+build clang-analyze: phony .ninja-clang-analyze.stamp
+build fanalyzer: phony .ninja-fanalyzer.stamp
+build sanitize-check: phony .ninja-sanitize-check.stamp
+build analysis: phony .ninja-analysis.stamp
 build clean: phony .ninja-clean.stamp
 build docs: phony $builddir/docs/man/man1/rosecore.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1
 build webdocs: phony .ninja-webdocs.stamp

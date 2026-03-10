@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/build"
+BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

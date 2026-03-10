@@ -32,6 +32,24 @@ static int is_pid_flag(const char *arg) {
 	return strcmp(arg, "--pid") == 0 || strcmp(arg, "/pid") == 0;
 }
 
+static int parse_i64_arg(const char *text, i64 *value) {
+	char *end = NULL;
+	long long parsed;
+
+	if(!text || !value) {
+		return -1;
+	}
+
+	errno = 0;
+	parsed = strtoll(text, &end, 10);
+	if(errno != 0 || end == text || *end != '\0') {
+		return -1;
+	}
+
+	*value = (i64) parsed;
+	return 0;
+}
+
 static void print_usage(void) {
 	fprintf(stderr, "Usage: rosenode <command> [args...]\n");
 	fprintf(stderr, "\n");
@@ -346,6 +364,11 @@ static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
 }
 
 int rosenode_main(int argc, char **argv) {
+	int exit_code = 0;
+	quicksand_connection *conn = NULL;
+	int64_t ret;
+	char topic[512];
+
 	if(argc < 2) {
 		print_usage();
 		return 1;
@@ -359,18 +382,14 @@ int rosenode_main(int argc, char **argv) {
 
 	const char *cmd = argv[1][0] == '/' ? argv[1] + 1 : argv[1];
 
-	// Determine which topic to use
-	char topic[512];
-	quicksand_connection *conn = NULL;
-	int64_t ret;
-
 	if(strcmp(cmd, "list") == 0) {
 		build_topic_name(topic, sizeof(topic), "dump");
 		ret = quicksand_connect(&conn, topic, -1,
 					ROSE_QUERY_MSG_SIZE, ROSE_DUMP_RING_SIZE, NULL);
 		if(ret != 0) {
 			fprintf(stderr, "Failed to connect to %s\n", topic);
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		skip_to_latest(conn);
@@ -380,7 +399,8 @@ int rosenode_main(int argc, char **argv) {
 	} else if(strcmp(cmd, "info") == 0) {
 		if(argc < 3) {
 			print_usage();
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		build_topic_name(topic, sizeof(topic), "lookup");
@@ -388,16 +408,23 @@ int rosenode_main(int argc, char **argv) {
 					ROSE_QUERY_MSG_SIZE, ROSE_LOOKUP_RING_SIZE, NULL);
 		if(ret != 0) {
 			fprintf(stderr, "Failed to connect to %s\n", topic);
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		skip_to_latest(conn);
 		if(is_pid_flag(argv[2])) {
 			if(argc < 4) {
 				print_usage();
-				return 1;
+				exit_code = 1;
+				goto cleanup;
 			}
-			i64 pid = atol(argv[3]);
+			i64 pid = 0;
+			if(parse_i64_arg(argv[3], &pid) != 0) {
+				fprintf(stderr, "Invalid pid: %s\n", argv[3]);
+				exit_code = 1;
+				goto cleanup;
+			}
 			send_lookup_pid_request(conn, pid);
 		} else {
 			send_lookup_name_request(conn, argv[2]);
@@ -408,7 +435,8 @@ int rosenode_main(int argc, char **argv) {
 	} else if(strcmp(cmd, "kill") == 0) {
 		if(argc < 3) {
 			print_usage();
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		int use_sigkill = 0;
@@ -417,7 +445,8 @@ int rosenode_main(int argc, char **argv) {
 		if(strcmp(argv[2], "-9") == 0) {
 			if(argc < 4) {
 				print_usage();
-				return 1;
+				exit_code = 1;
+				goto cleanup;
 			}
 			use_sigkill = 1;
 			name_arg = argv[3];
@@ -430,7 +459,8 @@ int rosenode_main(int argc, char **argv) {
 					ROSE_QUERY_MSG_SIZE, ROSE_LOOKUP_RING_SIZE, NULL);
 		if(ret != 0) {
 			fprintf(stderr, "Failed to connect to %s\n", topic);
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		skip_to_latest(conn);
@@ -439,8 +469,10 @@ int rosenode_main(int argc, char **argv) {
 
 	} else {
 		print_usage();
-		return 1;
+		exit_code = 1;
 	}
 
-	return 0;
+cleanup:
+	quicksand_disconnect(&conn, NULL);
+	return exit_code;
 }

@@ -22,7 +22,7 @@
 #define REMAP_SIZE 4096			 // at most 4kb of remap strings
 #define REMAP_COUNT 64			 // at most 64 remaps
 #define MAX_PUBSUB 256			 // at most n pubsubs
-#define MAX_MESSAGE_SIZE 1920 * 1080 * 3 // max size for a "spin'd" message
+#define MAX_MESSAGE_SIZE (1920 * 1080 * 3) // max size for a "spin'd" message
 #define ROSE_ERROR_BUFFER_SIZE 1024
 
 static rose_node *ROSE_STATIC_NODE = NULL;
@@ -87,7 +87,7 @@ static void rose_record_errorv(i64 code, const char *fmt, va_list ap) {
 
 	vsnprintf(ROSE_LAST_ERROR, sizeof(ROSE_LAST_ERROR), fmt, ap);
 	fprintf(stderr, "[ros3] %s\n", ROSE_LAST_ERROR);
-	fflush(stderr);
+	(void) fflush(stderr);
 }
 
 static void rose_record_error(i64 code, const char *fmt, ...) {
@@ -397,6 +397,14 @@ static i64 rose_resolve_topic_name(rose_node *n,
 static void rose_destroy_node_storage(rose_node *n) {
 	if(!n) {
 		return;
+	}
+	if(n->remap_strlens) {
+		rose_free(n, n->remap_strlens);
+		n->remap_strlens = NULL;
+	}
+	if(n->remaps) {
+		rose_free(n, n->remaps);
+		n->remaps = NULL;
 	}
 	if(n->subs) {
 		rose_free(n, n->subs);
@@ -921,9 +929,10 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	}
 	char *name = rose_alloc(n, name_len + 64);
 	if(!name) {
+		long long name_bytes = (long long) name_len + 64LL;
 		rose_record_error(ROSE_ERR_BUFFERSIZE,
 				  "rose_create_node could not allocate %lld bytes for the node name. Suggestion: check the allocator passed into ROS3 or retry with more memory available.",
-				  (long long) (name_len + 64));
+				  name_bytes);
 		rose_destroy_node_storage(n);
 		return NULL;
 	}
@@ -940,9 +949,10 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	}
 	char *prefix = rose_alloc(n, prefix_len + 1);
 	if(!prefix) {
+		long long prefix_bytes = (long long) prefix_len + 1LL;
 		rose_record_error(ROSE_ERR_BUFFERSIZE,
 				  "rose_create_node could not allocate %lld bytes for the namespace prefix. Suggestion: shorten the prefix or check the allocator passed into ROS3.",
-				  (long long) (prefix_len + 1));
+				  prefix_bytes);
 		rose_destroy_node_storage(n);
 		return NULL;
 	}
@@ -1042,16 +1052,36 @@ void rose_shutdown(rose_node *n) {
 		return;
 	}
 
+	void *dealloc = n->deallocator ? (void *) n->deallocator : NULL;
+
+	if(n->pubs) {
+		for(u64 i = 0; i < n->pubs_length; ++i) {
+			quicksand_disconnect(&n->pubs[i].pub, dealloc);
+		}
+	}
+	if(n->subs) {
+		for(u64 i = 0; i < n->subs_length; ++i) {
+			quicksand_disconnect(&n->subs[i].sub, dealloc);
+		}
+	}
+
+	quicksand_disconnect(&n->rosecore_pub.pub, dealloc);
+	quicksand_disconnect(&n->param_pub.pub, dealloc);
+	quicksand_disconnect(&n->log_pub.pub, dealloc);
+
 	if(n->param_sub.sub) {
-		// printf("deleting %s\n", n->param_sub.sub->name);
 		quicksand_delete((char *) n->param_sub.sub->name, -1);
-		n->param_sub.sub = NULL;
 	}
 	if(n->control_sub.sub) {
-		// printf("deleting %s\n", n->control_sub.sub->name);
 		quicksand_delete((char *) n->control_sub.sub->name, -1);
-		n->control_sub.sub = NULL;
 	}
+	quicksand_disconnect(&n->param_sub.sub, dealloc);
+	quicksand_disconnect(&n->control_sub.sub, dealloc);
+
+	if(ROSE_STATIC_NODE == n) {
+		ROSE_STATIC_NODE = NULL;
+	}
+	rose_destroy_node_storage(n);
 }
 
 rose_publisher *rose_create_pub(rose_node *n,
@@ -1462,7 +1492,7 @@ void rose_logv(rose_node *node, int level, const char *fmt, va_list ap) {
 	FILE *stream = (level == 0) ? stdout : stderr;
 	fputs(console_msg, stream);
 	fputc('\n', stream);
-	fflush(stream);
+	(void) fflush(stream);
 
 	// -----------------------------------------------------------------
 	// Build and publish a Mirage message.
@@ -1716,9 +1746,10 @@ i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
 	int64_t data_len = (param->cursor > 2) ? param->cursor - 2 : 0;
 	if(data_len > 0) {
 		if(m->cursor + data_len > m->max_length) {
+			long long required_size = (long long) m->cursor + (long long) data_len;
 			rose_record_error(ROSE_ERR_BUFFERSIZE,
 					  "rose_set_param needs %lld bytes to wrap parameter \"%.*s\", but only %lld bytes are available. Suggestion: use a smaller payload or inspect unusually large Mirage messages before calling `rose_set_param`.",
-					  (long long) (m->cursor + data_len),
+					  required_size,
 					  (int) param_name_length,
 					  param_name,
 					  (long long) m->max_length);

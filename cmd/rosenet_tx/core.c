@@ -7,6 +7,8 @@
 #include "ros3.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
+#include <limits.h>
 #include <netinet/tcp.h>
 #include <sched.h> 
 #include <signal.h>
@@ -63,10 +65,25 @@ static int has_flag(int argc, char **argv, const char *flag) {
 	return 0;
 }
 
+static int parse_i64_arg(const char *text, i64 *value) {
+	char *end = NULL;
+	long long parsed;
+
+	if(!text || !value) return -1;
+
+	errno = 0;
+	parsed = strtoll(text, &end, 10);
+	if(errno != 0 || end == text || *end != '\0') return -1;
+
+	*value = (i64) parsed;
+	return 0;
+}
+
 static i64 find_arg_i64(int argc, char **argv, const char *name, i64 fallback) {
 	const char *s = find_arg(argc, argv, name, NULL);
 	if(!s) return fallback;
-	return atoll(s);
+	if(parse_i64_arg(s, &fallback) != 0) return fallback;
+	return fallback;
 }
 
 // --- Network helpers ---------------------------------------------------------
@@ -117,10 +134,12 @@ int rosenet_tx_main(int argc, char **argv) {
 	// Fall back to positional: <topic> <host> <port> [--udp]
 	if(!topic && argc >= 2 && !is_option_token(argv[1])) topic = argv[1];
 	if(!host && argc >= 3 && !is_option_token(argv[2])) host = argv[2];
-	if(port < 0 && argc >= 4 && !is_option_token(argv[3])) port = atoi(argv[3]);
+	if(port < 0 && argc >= 4 && !is_option_token(argv[3])) {
+		if(parse_i64_arg(argv[3], &port) != 0) port = -1;
+	}
 	if(!use_udp && argc > 4 && arg_is(argv[4], "--udp")) use_udp = 1;
 
-	if(!topic || !host || port < 0) {
+	if(!topic || !host || port < 0 || port > UINT16_MAX) {
 		print_usage(argv[0]);
 		return 1;
 	}
@@ -162,6 +181,7 @@ int rosenet_tx_main(int argc, char **argv) {
 	addr.sin_port = htons((u16) port);
 	if(inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
 		fprintf(stderr, "Invalid address: %s\n", host);
+		if(close(sock) != 0) {}
 		return 1;
 	}
 
@@ -172,7 +192,7 @@ int rosenet_tx_main(int argc, char **argv) {
 				break;
 			}
 			rose_sleep(0.01);
-			close(sock);
+			if(close(sock) != 0) {}
 			sock = socket(AF_INET, SOCK_STREAM, 0);
 		}
 		if(!rose_ok(node)) return 1;
@@ -215,6 +235,6 @@ int rosenet_tx_main(int argc, char **argv) {
 		}
 	}
 
-	close(sock);
+	if(close(sock) != 0) {}
 	return 0;
 }

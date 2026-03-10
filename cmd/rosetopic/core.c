@@ -319,7 +319,7 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 				// Check if this node publishes to topic
 				if(strstr(pubs, topic_filter)) {
 					if(pub_count < 256) {
-						snprintf(publishers[pub_count], 256, "%s (pid %ld)",
+						snprintf(publishers[pub_count], 256, "%.220s (pid %ld)",
 							 name, (long) pid);
 						pub_count++;
 					}
@@ -327,7 +327,7 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 				// Check if this node subscribes to topic
 				if(strstr(subs, topic_filter)) {
 					if(sub_count < 256) {
-						snprintf(subscribers[sub_count], 256, "%s (pid %ld)",
+						snprintf(subscribers[sub_count], 256, "%.220s (pid %ld)",
 							 name, (long) pid);
 						sub_count++;
 					}
@@ -466,6 +466,9 @@ static int remove_topic(const char *topic_name) {
 }
 
 int rosetopic_main(int argc, char **argv) {
+	int exit_code = 0;
+	quicksand_connection *conn = NULL;
+
 	if(argc < 2) {
 		print_usage();
 		return 1;
@@ -483,13 +486,13 @@ int rosetopic_main(int argc, char **argv) {
 		char topic[512];
 		build_topic_name(topic, sizeof(topic), "dump");
 
-		quicksand_connection *conn = NULL;
 		int64_t ret = quicksand_connect(&conn, topic, -1,
 						ROSE_QUERY_MSG_SIZE,
 						ROSE_DUMP_RING_SIZE, NULL);
 		if(ret != 0) {
 			fprintf(stderr, "Failed to connect to %s\n", topic);
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		skip_to_latest(conn);
@@ -499,19 +502,20 @@ int rosetopic_main(int argc, char **argv) {
 	} else if(strcmp(cmd, "info") == 0) {
 		if(argc < 3) {
 			print_usage();
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		char topic[512];
 		build_topic_name(topic, sizeof(topic), "dump");
 
-		quicksand_connection *conn = NULL;
 		int64_t ret = quicksand_connect(&conn, topic, -1,
 						ROSE_QUERY_MSG_SIZE,
 						ROSE_DUMP_RING_SIZE, NULL);
 		if(ret != 0) {
 			fprintf(stderr, "Failed to connect to %s\n", topic);
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		// Convert user input: / -> %
@@ -525,7 +529,8 @@ int rosetopic_main(int argc, char **argv) {
 	} else if(strcmp(cmd, "echo") == 0) {
 		if(argc < 3) {
 			print_usage();
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		return echo_topic(argv[2]);
@@ -533,15 +538,18 @@ int rosetopic_main(int argc, char **argv) {
 	} else if(strcmp(cmd, "rm") == 0) {
 		if(argc < 3) {
 			print_usage();
-			return 1;
+			exit_code = 1;
+			goto cleanup;
 		}
 
 		return remove_topic(argv[2]);
 
 	} else {
 		print_usage();
-		return 1;
+		exit_code = 1;
 	}
 
-	return 0;
+cleanup:
+	quicksand_disconnect(&conn, NULL);
+	return exit_code;
 }

@@ -8,6 +8,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <limits.h>
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <stdio.h>
@@ -62,10 +63,25 @@ static int has_flag(int argc, char **argv, const char *flag) {
 	return 0;
 }
 
+static int parse_i64_arg(const char *text, i64 *value) {
+	char *end = NULL;
+	long long parsed;
+
+	if(!text || !value) return -1;
+
+	errno = 0;
+	parsed = strtoll(text, &end, 10);
+	if(errno != 0 || end == text || *end != '\0') return -1;
+
+	*value = (i64) parsed;
+	return 0;
+}
+
 static i64 find_arg_i64(int argc, char **argv, const char *name, i64 fallback) {
 	const char *s = find_arg(argc, argv, name, NULL);
 	if(!s) return fallback;
-	return atoll(s);
+	if(parse_i64_arg(s, &fallback) != 0) return fallback;
+	return fallback;
 }
 
 // --- Network helpers ---------------------------------------------------------
@@ -105,12 +121,18 @@ int rosenet_rx_main(int argc, char **argv) {
 	i64 pos_msg_size = 0;
 	i64 pos_slots = 0;
 	if(!topic && argc >= 2 && !is_option_token(argv[1])) topic = argv[1];
-	if(port < 0 && argc >= 3 && !is_option_token(argv[2])) port = atoi(argv[2]);
-	if(argc >= 4 && !is_option_token(argv[3])) pos_msg_size = atoi(argv[3]);
-	if(argc >= 5 && !is_option_token(argv[4])) pos_slots = atoi(argv[4]);
+	if(port < 0 && argc >= 3 && !is_option_token(argv[2])) {
+		if(parse_i64_arg(argv[2], &port) != 0) port = -1;
+	}
+	if(argc >= 4 && !is_option_token(argv[3])) {
+		if(parse_i64_arg(argv[3], &pos_msg_size) != 0) pos_msg_size = 0;
+	}
+	if(argc >= 5 && !is_option_token(argv[4])) {
+		if(parse_i64_arg(argv[4], &pos_slots) != 0) pos_slots = 0;
+	}
 	if(!use_udp && argc > 5 && arg_is(argv[5], "--udp")) use_udp = 1;
 
-	if(!topic || port < 0) {
+	if(!topic || port < 0 || port > UINT16_MAX) {
 		print_usage(argv[0]);
 		return 1;
 	}
@@ -176,6 +198,7 @@ int rosenet_rx_main(int argc, char **argv) {
 
 	if(bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
 		perror("bind");
+		if(close(sock) != 0) {}
 		return 1;
 	}
 
@@ -186,11 +209,12 @@ int rosenet_rx_main(int argc, char **argv) {
 		client = accept(sock, NULL, NULL);
 		if(client < 0) {
 			perror("accept");
+			if(close(sock) != 0) {}
 			return 1;
 		}
 		int flag = 1;
 		setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-		close(sock);
+		if(close(sock) != 0) {}
 		rose_info("Connected on port %lld", (long long) port);
 	} else {
 		rose_info("Listening for UDP on port %lld", (long long) port);
@@ -241,6 +265,6 @@ int rosenet_rx_main(int argc, char **argv) {
 		}
 	}
 
-	close(client);
+	if(close(client) != 0) {}
 	return 0;
 }

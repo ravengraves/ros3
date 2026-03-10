@@ -43,6 +43,17 @@ static u64 master_start_time = 0;
 
 static volatile int running = 1;
 
+static void copy_bounded_string(char *dst, size_t dst_size, const char *src) {
+	if(!dst || dst_size == 0) {
+		return;
+	}
+	if(!src) {
+		dst[0] = '\0';
+		return;
+	}
+	snprintf(dst, dst_size, "%s", src);
+}
+
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
 	    || strcmp(arg, "--help") == 0
@@ -195,7 +206,7 @@ static tracked_node *find_or_create_node(const char *name) {
 	}
 	tracked_node *n = &nodes[node_count++];
 	memset(n, 0, sizeof(*n));
-	strncpy(n->name, name, MAX_NAME_LEN - 1);
+	copy_bounded_string(n->name, sizeof(n->name), name);
 	n->active = 1;
 	return n;
 }
@@ -211,7 +222,9 @@ static void add_publisher(tracked_node *n, const char *topic) {
 		}
 	}
 	if(n->pub_count < MAX_TOPICS) {
-		strncpy(n->pubs[n->pub_count++], topic, MAX_NAME_LEN - 1);
+		copy_bounded_string(n->pubs[n->pub_count], sizeof(n->pubs[n->pub_count]),
+				    topic);
+		n->pub_count++;
 	}
 }
 
@@ -226,7 +239,9 @@ static void add_subscriber(tracked_node *n, const char *topic) {
 		}
 	}
 	if(n->sub_count < MAX_TOPICS) {
-		strncpy(n->subs[n->sub_count++], topic, MAX_NAME_LEN - 1);
+		copy_bounded_string(n->subs[n->sub_count], sizeof(n->subs[n->sub_count]),
+				    topic);
+		n->sub_count++;
 	}
 }
 
@@ -283,7 +298,7 @@ static void print_status(void) {
 		printf("\n");
 	}
 	printf("===========================\n\n");
-	fflush(stdout);
+	(void) fflush(stdout);
 }
 
 // Build comma-separated list of topics
@@ -636,7 +651,7 @@ int rosecore_main(int argc, char **argv) {
 	}
 
 	printf("[rosecore] Ready. Listening for node registrations...\n");
-	fflush(stdout);
+	(void) fflush(stdout);
 
 	msg = mirage_create(1024, NULL);
 	if(!msg) {

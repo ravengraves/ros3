@@ -10,6 +10,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,25 @@ static int is_help_arg(const char *arg) {
 
 static void print_usage(const char *argv0) {
 	fprintf(stderr, "Usage: %s <device> <rx_topic> <tx_topic> <baud> <msg_size> <slots>\n", argv0);
+}
+
+static int parse_int_arg(const char *text, int *value) {
+	char *end = NULL;
+	long parsed;
+
+	if(!text || !value) {
+		return -1;
+	}
+
+	errno = 0;
+	parsed = strtol(text, &end, 10);
+	if(errno != 0 || end == text || *end != '\0'
+	   || parsed < INT_MIN || parsed > INT_MAX) {
+		return -1;
+	}
+
+	*value = (int) parsed;
+	return 0;
 }
 
 static speed_t baud_to_speed(int baud) {
@@ -86,9 +106,16 @@ int roseserial_main(int argc, char **argv) {
 	const char *device = argv[1];
 	const char *rx_topic = argv[2];
 	const char *tx_topic = argv[3];
-	int baud = atoi(argv[4]);
-	int msg_size = atoi(argv[5]);
-	int slots = atoi(argv[6]);
+	int baud = 0;
+	int msg_size = 0;
+	int slots = 0;
+
+	if(parse_int_arg(argv[4], &baud) != 0
+	   || parse_int_arg(argv[5], &msg_size) != 0
+	   || parse_int_arg(argv[6], &slots) != 0) {
+		print_usage(argv[0]);
+		return 1;
+	}
 
 	int fd = serial_open(device, baud);
 	if(fd < 0) {
@@ -106,6 +133,7 @@ int roseserial_main(int argc, char **argv) {
 
 	if(!rx_pub || !tx_sub) {
 		fprintf(stderr, "Failed to create topics\n");
+		if(close(fd) != 0) {}
 		return 1;
 	}
 
@@ -137,11 +165,15 @@ int roseserial_main(int argc, char **argv) {
 		if(rose_read(tx_sub, msg) >= 0) {
 			hdr[0] = msg->length & 0xFF;
 			hdr[1] = (msg->length >> 8) & 0xFF;
-			write(fd, hdr, 2);
-			write(fd, msg->data, msg->length);
+			if(write(fd, hdr, 2) != 2) {
+				break;
+			}
+			if(write(fd, msg->data, msg->length) != msg->length) {
+				break;
+			}
 		}
 	}
 
-	close(fd);
+	if(close(fd) != 0) {}
 	return 0;
 }

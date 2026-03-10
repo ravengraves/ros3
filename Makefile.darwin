@@ -3,24 +3,36 @@ AR ?= ar
 GCC ?= clang
 GCC_AR ?= ar
 CXX ?= clang++
+CLANG ?= clang
+CLANGXX ?= clang++
+CLANG_TIDY ?= clang-tidy
+GCC_ANALYZER ?= gcc
 SCDOC ?= scdoc
 
 BUILD_DIR := build
 PREFIX ?= /usr/local
 DESTDIR ?=
 VERSION ?= 1.0.0
+SANITIZERS ?= address,undefined
+SANITIZER_CFLAGS ?= -fsanitize=$(SANITIZERS) -fno-omit-frame-pointer
+SANITIZER_LDFLAGS ?= -fsanitize=$(SANITIZERS)
+SANITIZE_BUILD_DIR ?= build-sanitize
+MIRAGE_DIR ?= ../mirage
+QUICKSAND_DIR ?= ../quicksand
+DEPENDENCY_INCLUDE_DIRS := -I$(abspath $(MIRAGE_DIR)/include) -I$(abspath $(QUICKSAND_DIR)/include) -I$(PREFIX)/include
+LOCAL_STATIC_LIBS := $(abspath $(MIRAGE_DIR)/build/libmirage.a) $(abspath $(QUICKSAND_DIR)/build/libquicksand.a)
 
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
 	-fno-stack-protector -D_FORTIFY_SOURCE=0 \
-	-Iinclude -I$(PREFIX)/include -O3
+	-Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 CFLAGS_LTO := $(CFLAGS_BASE) -flto
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
 CFLAGS_SO := $(CFLAGS_BASE)
 
 CEXE := -Wl,-dead_strip
 LDFLAGS :=
-CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude -I$(PREFIX)/include -O3
+CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 
 SOURCE := src/ros3.c
 HEADER := include/ros3.h
@@ -46,6 +58,20 @@ TEST_TARGETS := \
 	$(BUILD_DIR)/test_cpp_publisher \
 	$(BUILD_DIR)/test_cpp_subscriber
 ALL_EXECUTABLES := $(BIN_TARGETS) $(TEST_TARGETS)
+ANALYZE_C_SOURCES := \
+	src/ros3.c \
+	cmd/rosecore/main+posix.c cmd/rosecore/core.c \
+	cmd/rosenode/main+posix.c cmd/rosenode/core.c \
+	cmd/rosetopic/main+posix.c cmd/rosetopic/core.c \
+	cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c \
+	cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c \
+	cmd/roseserial/main+posix.c cmd/roseserial/core.c \
+	cmd/test/main.c \
+	cmd/test_net_pub/main.c \
+	cmd/test_net_sub/main.c
+ANALYZE_CPP_SOURCES := test/cpp/publisher.cpp test/cpp/subscriber.cpp
+ANALYZE_CFLAGS = $(filter-out -flto -Werror -Wpedantic,$(CFLAGS_LTO))
+ANALYZE_CXXFLAGS = $(filter-out -Werror -Wpedantic,$(CXXFLAGS))
 
 MAN_PAGES := rosecore.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
 DOC_SOURCE_DIR := docs/man/man1
@@ -60,6 +86,19 @@ INCLUDE_INSTALL_DIR := $(DESTDIR)$(PREFIX)/include
 PKGCONFIG_INSTALL_DIR := $(LIB_INSTALL_DIR)/pkgconfig
 DOC_INSTALL_DIR := $(DESTDIR)$(PREFIX)/share/man/man1
 COMPLETION_INSTALL_DIR := $(DESTDIR)$(PREFIX)/share/bash-completion/completions
+
+ifeq ($(SANITIZE),1)
+	CC := $(CLANG)
+	CXX := $(CLANGXX)
+	CFLAGS_BASE := $(filter-out -Werror,$(CFLAGS_BASE)) $(SANITIZER_CFLAGS)
+	CFLAGS_LTO := $(CFLAGS_BASE)
+	CFLAGS_GCC_LTO := $(CFLAGS_BASE) -Wno-pedantic
+	CFLAGS_SO := $(CFLAGS_BASE)
+	CEXE :=
+	LDFLAGS := $(LDFLAGS) $(SANITIZER_LDFLAGS)
+	CXXFLAGS := $(filter-out -Werror,$(CXXFLAGS)) $(SANITIZER_CFLAGS)
+	DEP_STATIC_LIBS := $(LOCAL_STATIC_LIBS)
+endif
 
 # Build all libraries and executables (default target).
 all: $(LIB_TARGETS) $(ALL_EXECUTABLES)
@@ -143,8 +182,55 @@ $(PC_FILE): Makefile.darwin
 		echo 'Cflags: -I$${includedir}'; \
 	} > $@
 
-check: $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
-	./test_utils+darwin.sh
+tidy:
+	@set -e; \
+	for src in $(ANALYZE_C_SOURCES); do \
+		echo "CLANG-TIDY $$src"; \
+		$(CLANG_TIDY) -quiet --extra-arg=-Wno-unused-command-line-argument $$src -- $(ANALYZE_CFLAGS); \
+	done; \
+	for src in $(ANALYZE_CPP_SOURCES); do \
+		echo "CLANG-TIDY $$src"; \
+		$(CLANG_TIDY) -quiet --extra-arg=-Wno-unused-command-line-argument $$src -- $(ANALYZE_CXXFLAGS); \
+	done
+
+clang-analyze:
+	@set -e; \
+	for src in $(ANALYZE_C_SOURCES); do \
+		echo "CLANG-ANALYZE $$src"; \
+		$(CLANG) $(ANALYZE_CFLAGS) --analyze -Xanalyzer -analyzer-output=text $$src; \
+	done
+
+fanalyzer:
+	@set -e; \
+	for src in $(ANALYZE_C_SOURCES); do \
+		echo "FANALYZER $$src"; \
+		$(GCC_ANALYZER) $(ANALYZE_CFLAGS) -fanalyzer -c $$src -o /dev/null; \
+	done
+
+check-runtime: $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
+	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test_utils+darwin.sh
+
+check-analysis:
+	@set +e; \
+	for target in tidy clang-analyze fanalyzer; do \
+		echo "== $$target (warnings only) =="; \
+		$(MAKE) --no-print-directory $$target || \
+			echo "$$target reported findings; continuing to sanitizer tests"; \
+	done
+
+sanitize-deps:
+	$(MAKE) -C $(MIRAGE_DIR) build/libmirage.a
+	$(MAKE) -C $(QUICKSAND_DIR) build/libquicksand.a
+
+sanitize-check: sanitize-deps
+	rm -rf $(SANITIZE_BUILD_DIR)
+	ASAN_OPTIONS=detect_leaks=1:strict_init_order=1:check_initialization_order=1 \
+	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+	$(MAKE) BUILD_DIR=$(SANITIZE_BUILD_DIR) SANITIZE=1 check-runtime
+
+analysis: check-analysis
+
+check: check-analysis sanitize-check
 
 install-bin: $(BIN_TARGETS)
 	mkdir -p $(BIN_INSTALL_DIR) $(COMPLETION_INSTALL_DIR)
@@ -182,7 +268,7 @@ format:
 	clang-format -style=file -i $$(find . | grep -e '\.c$$' -e '\.h$$')
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(SANITIZE_BUILD_DIR)
 
 python: $(BUILD_DIR)/libros3.dylib
 	cd lang/python && pip install .
@@ -193,7 +279,7 @@ check-python: $(BUILD_DIR)/libros3.dylib
 check-cpp: $(BUILD_DIR)/rosecore $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
 	./test_cpp.sh
 
-.PHONY: all check clean docs webdocs \
+.PHONY: all check check-runtime check-analysis tidy clang-analyze fanalyzer sanitize-deps sanitize-check analysis clean docs webdocs \
 	install-bin install-docs install-lib install \
 	uninstall-bin uninstall-docs uninstall-lib uninstall \
 	format python check-python check-cpp
