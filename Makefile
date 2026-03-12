@@ -1,8 +1,12 @@
-CC ?= clang
-AR ?= llvm-ar
+ifeq ($(origin CC), default)
+CC := clang
+endif
+ifeq ($(origin AR), default)
+AR := llvm-ar
+endif
+CXX ?= g++
 GCC ?= gcc
 GCC_AR ?= gcc-ar
-CXX ?= g++
 NINJA ?= ninja
 CLANG ?= clang
 CLANGXX ?= clang++

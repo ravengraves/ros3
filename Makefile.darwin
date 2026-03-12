@@ -1,8 +1,14 @@
-CC ?= clang
-AR ?= ar
+ifeq ($(origin CC), default)
+CC := clang
+endif
+ifeq ($(origin AR), default)
+AR := ar
+endif
+ifeq ($(origin CXX), default)
+CXX := clang++
+endif
 GCC ?= clang
 GCC_AR ?= ar
-CXX ?= clang++
 CLANG ?= clang
 CLANGXX ?= clang++
 CLANG_TIDY ?= clang-tidy

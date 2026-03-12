@@ -31,6 +31,12 @@ static _Thread_local i64 ROSE_LAST_ERROR_CODE = ROSE_OK;
 
 static void *rose_alloc(rose_node *node, size_t size);
 static void rose_free(rose_node *node, void *ptr);
+static i64 rose_quicksand_connect(rose_node *node,
+				  quicksand_connection **connection,
+				  char *topic, i64 topic_length,
+				  i64 message_size, i64 message_rate);
+static void rose_quicksand_disconnect(rose_node *node,
+				      quicksand_connection **connection);
 
 const char *rose_last_error(void) {
 	return ROSE_LAST_ERROR;
@@ -435,9 +441,8 @@ static i64 rose_connect_with_retry(rose_node *n,
 	u64 last_report_ns = 0;
 
 	for(;;) {
-		i64 rc = quicksand_connect(connection, topic, -1,
-					   message_size, message_rate,
-					   (void *) n->allocator);
+		i64 rc = rose_quicksand_connect(n, connection, topic, -1,
+						message_size, message_rate);
 		if(rc == 0) {
 			return 0;
 		}
@@ -562,6 +567,23 @@ static void rose_free(rose_node *node, void *ptr) {
 	} else {
 		free(ptr);
 	}
+}
+
+static i64 rose_quicksand_connect(rose_node *node,
+				  quicksand_connection **connection,
+				  char *topic, i64 topic_length,
+				  i64 message_size, i64 message_rate) {
+	(void) node;
+	// quicksand exposes allocator hooks as void*, which is not ISO C-compatible
+	// for function pointers. Use the system allocator for quicksand-owned state.
+	return quicksand_connect(connection, topic, topic_length,
+				 message_size, message_rate, NULL);
+}
+
+static void rose_quicksand_disconnect(rose_node *node,
+				      quicksand_connection **connection) {
+	(void) node;
+	quicksand_disconnect(connection, NULL);
 }
 
 // Advance a subscriber to the latest slot to avoid stale reads on startup.
@@ -1052,22 +1074,20 @@ void rose_shutdown(rose_node *n) {
 		return;
 	}
 
-	void *dealloc = n->deallocator ? (void *) n->deallocator : NULL;
-
 	if(n->pubs) {
 		for(u64 i = 0; i < n->pubs_length; ++i) {
-			quicksand_disconnect(&n->pubs[i].pub, dealloc);
+			rose_quicksand_disconnect(n, &n->pubs[i].pub);
 		}
 	}
 	if(n->subs) {
 		for(u64 i = 0; i < n->subs_length; ++i) {
-			quicksand_disconnect(&n->subs[i].sub, dealloc);
+			rose_quicksand_disconnect(n, &n->subs[i].sub);
 		}
 	}
 
-	quicksand_disconnect(&n->rosecore_pub.pub, dealloc);
-	quicksand_disconnect(&n->param_pub.pub, dealloc);
-	quicksand_disconnect(&n->log_pub.pub, dealloc);
+	rose_quicksand_disconnect(n, &n->rosecore_pub.pub);
+	rose_quicksand_disconnect(n, &n->param_pub.pub);
+	rose_quicksand_disconnect(n, &n->log_pub.pub);
 
 	if(n->param_sub.sub) {
 		quicksand_delete((char *) n->param_sub.sub->name, -1);
@@ -1075,8 +1095,8 @@ void rose_shutdown(rose_node *n) {
 	if(n->control_sub.sub) {
 		quicksand_delete((char *) n->control_sub.sub->name, -1);
 	}
-	quicksand_disconnect(&n->param_sub.sub, dealloc);
-	quicksand_disconnect(&n->control_sub.sub, dealloc);
+	rose_quicksand_disconnect(n, &n->param_sub.sub);
+	rose_quicksand_disconnect(n, &n->control_sub.sub);
 
 	if(ROSE_STATIC_NODE == n) {
 		ROSE_STATIC_NODE = NULL;
@@ -1126,10 +1146,9 @@ rose_publisher *rose_create_pub(rose_node *n,
 	rose_publisher *pub = n->pubs + n->pubs_length;
 	pub->node = n;
 
-	int64_t ret = quicksand_connect(&pub->pub, topic, -1,
-					(int64_t) message_length,
-					(int64_t) message_hz,
-					(void *) n->allocator);
+	int64_t ret = rose_quicksand_connect(n, &pub->pub, topic, -1,
+					     (int64_t) message_length,
+					     (int64_t) message_hz);
 	if(ret != 0) {
 		char code_buf[128];
 		rose_format_errno_code(ret, code_buf, sizeof(code_buf));
@@ -1186,7 +1205,7 @@ rose_subscriber *rose_create_sub(rose_node *n,
 	sub->callback = callback;
 	sub->latest_only = latest_only;
 
-	int64_t ret = quicksand_connect(&sub->sub, topic, -1, -1, -1, (void *) n->allocator);
+	int64_t ret = rose_quicksand_connect(n, &sub->sub, topic, -1, -1, -1);
 	if(ret != 0) {
 		char code_buf[128];
 		rose_format_errno_code(ret, code_buf, sizeof(code_buf));
