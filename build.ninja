@@ -113,12 +113,12 @@ build $builddir/test_cpp_publisher: link_cpp test/cpp/publisher.cpp | $builddir/
 build $builddir/test_cpp_subscriber: link_cpp test/cpp/subscriber.cpp | $builddir/libros3_gcc_lto.a
   lib = $builddir/libros3_gcc_lto.a
 
-build $builddir/docs/man/man1/rosecore.1: scdoc docs/man/man1/rosecore.1.scd
-build $builddir/docs/man/man1/rosenode.1: scdoc docs/man/man1/rosenode.1.scd
-build $builddir/docs/man/man1/rosetopic.1: scdoc docs/man/man1/rosetopic.1.scd
-build $builddir/docs/man/man1/rosenet_tx.1: scdoc docs/man/man1/rosenet_tx.1.scd
-build $builddir/docs/man/man1/rosenet_rx.1: scdoc docs/man/man1/rosenet_rx.1.scd
-build $builddir/docs/man/man1/roseserial.1: scdoc docs/man/man1/roseserial.1.scd
+build $builddir/doc/man/man1/rosecore.1: scdoc doc/man/man1/rosecore.1.scd
+build $builddir/doc/man/man1/rosenode.1: scdoc doc/man/man1/rosenode.1.scd
+build $builddir/doc/man/man1/rosetopic.1: scdoc doc/man/man1/rosetopic.1.scd
+build $builddir/doc/man/man1/rosenet_tx.1: scdoc doc/man/man1/rosenet_tx.1.scd
+build $builddir/doc/man/man1/rosenet_rx.1: scdoc doc/man/man1/rosenet_rx.1.scd
+build $builddir/doc/man/man1/roseserial.1: scdoc doc/man/man1/roseserial.1.scd
 
 build $builddir/ros3.pc: gen_pc
 
@@ -146,16 +146,16 @@ build .ninja-clean.stamp: run FORCE
   cmd = mkdir -p $builddir && rm -rf $builddir/* && rm -f compile_commands.json && touch .ninja-clean.stamp
   name = clean
 
-build .ninja-webdocs.stamp: run FORCE | docs/web/build.sh docs/web/index.html docs/web/logo.svg docs/web/pages/00-build-install.md docs/web/pages/01-project-setup.md docs/web/pages/02-pubsub-c.md docs/web/pages/03-pubsub-cpp.md docs/web/pages/04-pubsub-python.md docs/web/pages/05-tools.md docs/web/pages/06-roseserial.md docs/web/pages/07-multi-machine.md docs/web/pages/08-mirage-datatypes.md docs/web/pages/09-package-control-subtree.md
-  cmd = ./docs/web/build.sh && touch .ninja-webdocs.stamp
+build .ninja-webdocs.stamp: run FORCE | doc/web/build.sh doc/web/index.html doc/web/logo.svg doc/web/pages/00-build-install.md doc/web/pages/01-project-setup.md doc/web/pages/02-pubsub-c.md doc/web/pages/03-pubsub-cpp.md doc/web/pages/04-pubsub-python.md doc/web/pages/05-tools.md doc/web/pages/06-roseserial.md doc/web/pages/07-multi-machine.md doc/web/pages/08-mirage-datatypes.md doc/web/pages/09-package-control-subtree.md
+  cmd = ./doc/web/build.sh && touch .ninja-webdocs.stamp
   name = webdocs
 
 build .ninja-install-bin.stamp: run FORCE | $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial
-  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/bin $$dest$$prefix/share/bash-completion/completions && install -m 0755 $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial $$dest$$prefix/bin/ && install -m 0644 completions/ros3.bash $$dest$$prefix/share/bash-completion/completions/ros3.bash && touch .ninja-install-bin.stamp
+  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/bin $$dest$$prefix/share/bash-completion/completions && install -m 0755 $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial $$dest$$prefix/bin/ && install -m 0644 cmd/ros3.bash $$dest$$prefix/share/bash-completion/completions/ros3.bash && touch .ninja-install-bin.stamp
   name = install-bin
 
-build .ninja-install-docs.stamp: run FORCE | $builddir/docs/man/man1/rosecore.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1
-  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/share/man/man1 && install -m 0644 $builddir/docs/man/man1/rosecore.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1 $$dest$$prefix/share/man/man1/ && touch .ninja-install-docs.stamp
+build .ninja-install-docs.stamp: run FORCE | $builddir/doc/man/man1/rosecore.1 $builddir/doc/man/man1/rosenode.1 $builddir/doc/man/man1/rosetopic.1 $builddir/doc/man/man1/rosenet_tx.1 $builddir/doc/man/man1/rosenet_rx.1 $builddir/doc/man/man1/roseserial.1
+  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/share/man/man1 && install -m 0644 $builddir/doc/man/man1/rosecore.1 $builddir/doc/man/man1/rosenode.1 $builddir/doc/man/man1/rosetopic.1 $builddir/doc/man/man1/rosenet_tx.1 $builddir/doc/man/man1/rosenet_rx.1 $builddir/doc/man/man1/roseserial.1 $$dest$$prefix/share/man/man1/ && touch .ninja-install-docs.stamp
   name = install-docs
 
 build .ninja-install-lib.stamp: run FORCE | $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $builddir/ros3.pc
@@ -182,7 +182,7 @@ build fanalyzer: phony .ninja-fanalyzer.stamp
 build sanitize-check: phony .ninja-sanitize-check.stamp
 build analysis: phony .ninja-analysis.stamp
 build clean: phony .ninja-clean.stamp
-build docs: phony $builddir/docs/man/man1/rosecore.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1
+build docs: phony $builddir/doc/man/man1/rosecore.1 $builddir/doc/man/man1/rosenode.1 $builddir/doc/man/man1/rosetopic.1 $builddir/doc/man/man1/rosenet_tx.1 $builddir/doc/man/man1/rosenet_rx.1 $builddir/doc/man/man1/roseserial.1
 build webdocs: phony .ninja-webdocs.stamp
 
 build install-bin: phony .ninja-install-bin.stamp

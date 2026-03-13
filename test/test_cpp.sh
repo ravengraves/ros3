@@ -4,7 +4,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/build}"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="${BUILD_DIR:-$ROOT_DIR/build}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -16,7 +17,7 @@ fail() { echo -e "${RED}FAIL${NC}: $1"; cleanup; exit 1; }
 cleanup() {
     trap - EXIT INT TERM
     [ -n "$SUB_PID" ] && kill "$SUB_PID" 2>/dev/null || true
-    [ -n "$MASTER_PID" ] && kill "$MASTER_PID" 2>/dev/null || true
+    [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
     rm -f "/dev/shm/${ROSE_BASE}%"* 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -27,7 +28,7 @@ export ROSE_BASE="test_cpp"
 rm -f "/dev/shm/${ROSE_BASE}%"* 2>/dev/null || true
 
 "$BUILD_DIR/rosecore" >/dev/null 2>&1 &
-MASTER_PID=$!
+CORE_PID=$!
 
 # Let rosecore create core topics before starting test nodes.
 sleep 0.6

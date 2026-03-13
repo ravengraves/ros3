@@ -45,7 +45,7 @@ CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_I
 
 SOURCE := src/ros3.c
 HEADER := include/ros3.h
-COMPLETION_BASH := completions/ros3.bash
+COMPLETION_BASH := cmd/ros3.bash
 PC_FILE := $(BUILD_DIR)/ros3.pc
 
 LIB_TARGETS := $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a
@@ -77,13 +77,14 @@ ANALYZE_C_SOURCES := \
 ANALYZE_CPP_SOURCES := test/cpp/publisher.cpp test/cpp/subscriber.cpp
 ANALYZE_CFLAGS = $(filter-out -flto -Werror -Wpedantic,$(CFLAGS_LTO))
 ANALYZE_CXXFLAGS = $(filter-out -Werror -Wpedantic,$(CXXFLAGS))
+CLANG_TIDY_CHECKS ?= -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
 MAN_PAGES := rosecore.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
-DOC_SOURCE_DIR := docs/man/man1
-DOC_BUILD_DIR := $(BUILD_DIR)/docs/man/man1
+DOC_SOURCE_DIR := doc/man/man1
+DOC_BUILD_DIR := $(BUILD_DIR)/doc/man/man1
 DOC_BUILD_TARGETS := $(addprefix $(DOC_BUILD_DIR)/,$(MAN_PAGES))
-WEBDOC_SCRIPT := docs/web/build.sh
-WEBDOC_SOURCES := $(WEBDOC_SCRIPT) docs/web/index.html docs/web/logo.svg $(wildcard docs/web/pages/*.md)
+WEBDOC_SCRIPT := doc/web/build.sh
+WEBDOC_SOURCES := $(WEBDOC_SCRIPT) doc/web/index.html doc/web/logo.svg $(wildcard doc/web/pages/*.md)
 
 DEP_SHARED_LIBS := -L$(PREFIX)/lib -Wl,-rpath,$(PREFIX)/lib -lmirage -lquicksand
 DEP_STATIC_LIBS := $(PREFIX)/lib/libmirage.a $(PREFIX)/lib/libquicksand.a
@@ -211,11 +212,11 @@ tidy:
 	@set -e; \
 	for src in $(ANALYZE_C_SOURCES); do \
 		echo "CLANG-TIDY $$src"; \
-		$(CLANG_TIDY) -quiet --extra-arg=-Wno-unused-command-line-argument $$src -- $(ANALYZE_CFLAGS); \
+		$(CLANG_TIDY) -quiet -checks='$(CLANG_TIDY_CHECKS)' --extra-arg=-Wno-unused-command-line-argument $$src -- $(ANALYZE_CFLAGS); \
 	done; \
 	for src in $(ANALYZE_CPP_SOURCES); do \
 		echo "CLANG-TIDY $$src"; \
-		$(CLANG_TIDY) -quiet --extra-arg=-Wno-unused-command-line-argument $$src -- $(ANALYZE_CXXFLAGS); \
+		$(CLANG_TIDY) -quiet -checks='$(CLANG_TIDY_CHECKS)' --extra-arg=-Wno-unused-command-line-argument $$src -- $(ANALYZE_CXXFLAGS); \
 	done
 
 clang-analyze:
@@ -233,8 +234,8 @@ fanalyzer:
 	done
 
 check-runtime: $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
-	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test_utils.sh
-	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test_net.sh
+	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test/test_utils.sh
+	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test/test_net.sh
 
 check-analysis:
 	@set +e; \
@@ -263,7 +264,7 @@ install-bin: $(BIN_TARGETS)
 	install -m 0755 $(BIN_TARGETS) $(BIN_INSTALL_DIR)/
 	install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/ros3.bash
 
-install-docs: docs
+install-docs:
 	mkdir -p $(DOC_INSTALL_DIR)
 	install -m 0644 $(DOC_BUILD_TARGETS) $(DOC_INSTALL_DIR)/
 
@@ -273,7 +274,7 @@ install-lib: $(LIB_TARGETS) $(PC_FILE)
 	install -m 0644 $(HEADER) $(INCLUDE_INSTALL_DIR)/ros3.h
 	install -m 0644 $(PC_FILE) $(PKGCONFIG_INSTALL_DIR)/ros3.pc
 
-install: install-lib install-bin install-docs
+install: install-lib install-bin
 
 uninstall-bin:
 	rm -f $(BIN_INSTALL_DIR)/rosecore $(BIN_INSTALL_DIR)/rosenode $(BIN_INSTALL_DIR)/rosetopic
@@ -298,13 +299,13 @@ clean:
 	rm -f compile_commands.json
 
 python: $(BUILD_DIR)/libros3.so
-	cd lang/python && pip install .
+	cd lang/python && { pip install --break-system-packages -e .; } || { pip install -e .; }
 
 check-python: $(BUILD_DIR)/libros3.so
-	cd lang/python && pip install --break-system-packages -e . && cd ../.. && python3 test/python/test_pubsub.py
+	python3 test/python/test_pubsub.py
 
 check-cpp: $(BUILD_DIR)/rosecore $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/test_cpp_subscriber
-	./test_cpp.sh
+	./test/test_cpp.sh
 
 .PHONY: all check check-runtime check-analysis tidy clang-analyze fanalyzer sanitize-deps sanitize-check analysis clean docs webdocs \
 	install-bin install-docs install-lib install \

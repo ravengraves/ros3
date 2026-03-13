@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ROS3">
+  <rect width="128" height="128" rx="18" fill="#000000"/>
+  <path d="M40 40L40 88M40 88L88 88" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="40" cy="40" r="16" fill="#FF00FF"/>
+  <circle cx="40" cy="88" r="16" fill="#FF0080"/>
+  <circle cx="88" cy="88" r="16" fill="#8000FF"/>
+</svg>

@@ -4,7 +4,7 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 REPO="$(CDPATH= cd -- "$ROOT/../.." && pwd)"
 PAGES_DIR="$ROOT/pages"
-OUT_DIR="$REPO/build/docs/web"
+OUT_DIR="$REPO/build/doc/web"
 FRAG_DIR="$OUT_DIR/.fragments"
 TEMPLATE="$ROOT/index.html"
 OUT_FILE="$OUT_DIR/index.html"

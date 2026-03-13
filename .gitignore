@@ -1,7 +1,15 @@
 build/
+build-*/
 install/bin/
 install/lib/
 install/include/
 install/share/
 .ninja-*.stamp
 !install/.gitkeep
+
+# Python
+*.egg-info/
+__pycache__/
+*.so
+*.whl
+*.pyc

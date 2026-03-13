@@ -38,7 +38,7 @@ $ rosetopic echo /chatter
 
 $ rosetopic hz /chatter
 
-## Remove a topic shared-memory segment
+## Remove an old topic shared-memory segment
 
 $ rosetopic rm /chatter
 

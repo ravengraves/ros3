@@ -40,7 +40,7 @@ Commands and options:
 - `rosetopic info <topic>`
 - `rosetopic echo <topic>`
 - `rosetopic hz <topic>`
-- `rosetopic rm <topic>`
+- `rosetopic rm <topic>` - delete an old topic (e.g. if you changed the size)
 
 ### rosenet_tx
 

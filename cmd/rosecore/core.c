@@ -19,12 +19,12 @@
 #define MAX_NODES 2048
 #define MAX_TOPICS 64
 #define MAX_NAME_LEN 256
-#define MASTER_HEARTBEAT_MSG_SIZE ((i64) sizeof(i64))
-#define MASTER_HEARTBEAT_RATE 256
-#define MASTER_HEARTBEAT_STARTUP_WINDOW_NS 300000000.0
-#define MASTER_HEARTBEAT_STARTUP_PUB_NS 10000000.0
-#define MASTER_HEARTBEAT_STEADY_PUB_NS 100000000.0
-#define MASTER_HEARTBEAT_POLL_SLEEP_NS 1000000ULL
+#define CORE_HEARTBEAT_MSG_SIZE ((i64) sizeof(i64))
+#define CORE_HEARTBEAT_RATE 256
+#define CORE_HEARTBEAT_STARTUP_WINDOW_NS 300000000.0
+#define CORE_HEARTBEAT_STARTUP_PUB_NS 10000000.0
+#define CORE_HEARTBEAT_STEADY_PUB_NS 100000000.0
+#define CORE_HEARTBEAT_POLL_SLEEP_NS 1000000ULL
 
 typedef struct {
 	char name[MAX_NAME_LEN];
@@ -39,7 +39,7 @@ typedef struct {
 
 static tracked_node nodes[MAX_NODES];
 static int node_count = 0;
-static u64 master_start_time = 0;
+static u64 core_start_time = 0;
 
 static volatile int running = 1;
 
@@ -89,30 +89,30 @@ static void cleanup_core_topics(const char *topic,
 	unlink_topic_if_present(heartbeat_topic);
 }
 
-static int send_master_heartbeat(quicksand_connection *conn, i64 self_pid) {
+static int send_CORE_HEARTBEAT(quicksand_connection *conn, i64 self_pid) {
 	if(!conn) {
 		return -EINVAL;
 	}
-	return (int) quicksand_write(conn, (u8 *) &self_pid, MASTER_HEARTBEAT_MSG_SIZE);
+	return (int) quicksand_write(conn, (u8 *) &self_pid, CORE_HEARTBEAT_MSG_SIZE);
 }
 
-static int read_master_heartbeat(quicksand_connection *conn, i64 *pid) {
-	i64 sz = MASTER_HEARTBEAT_MSG_SIZE;
+static int read_CORE_HEARTBEAT(quicksand_connection *conn, i64 *pid) {
+	i64 sz = CORE_HEARTBEAT_MSG_SIZE;
 	i64 read_pid = 0;
 	i64 ret = quicksand_read(conn, (u8 *) &read_pid, &sz);
 	if(ret < 0) {
 		return (int) ret;
 	}
-	if(sz != MASTER_HEARTBEAT_MSG_SIZE) {
+	if(sz != CORE_HEARTBEAT_MSG_SIZE) {
 		return -EINVAL;
 	}
 	*pid = read_pid;
 	return 0;
 }
 
-static void skip_old_master_heartbeats(quicksand_connection *conn) {
+static void skip_old_CORE_HEARTBEATs(quicksand_connection *conn) {
 	i64 ignored_pid = 0;
-	i64 sz = MASTER_HEARTBEAT_MSG_SIZE;
+	i64 sz = CORE_HEARTBEAT_MSG_SIZE;
 	quicksand_read_latest(conn, (u8 *) &ignored_pid, &sz);
 }
 
@@ -122,13 +122,13 @@ static int startup_heartbeat_resolution(quicksand_connection *pub,
 	u64 start = quicksand_now();
 	u64 last_pub = 0;
 
-	skip_old_master_heartbeats(sub);
+	skip_old_CORE_HEARTBEATs(sub);
 
-	while(quicksand_ns(quicksand_now(), start) < MASTER_HEARTBEAT_STARTUP_WINDOW_NS) {
+	while(quicksand_ns(quicksand_now(), start) < CORE_HEARTBEAT_STARTUP_WINDOW_NS) {
 		u64 now = quicksand_now();
 		if(last_pub == 0
-		   || quicksand_ns(now, last_pub) >= MASTER_HEARTBEAT_STARTUP_PUB_NS) {
-			if(send_master_heartbeat(pub, self_pid) < 0) {
+		   || quicksand_ns(now, last_pub) >= CORE_HEARTBEAT_STARTUP_PUB_NS) {
+			if(send_CORE_HEARTBEAT(pub, self_pid) < 0) {
 				fprintf(stderr, "[rosecore] Failed to publish startup heartbeat\n");
 				return -1;
 			}
@@ -137,7 +137,7 @@ static int startup_heartbeat_resolution(quicksand_connection *pub,
 
 		for(;;) {
 			i64 seen_pid = 0;
-			int ret = read_master_heartbeat(sub, &seen_pid);
+			int ret = read_CORE_HEARTBEAT(sub, &seen_pid);
 			if(ret < 0) {
 				break;
 			}
@@ -149,7 +149,7 @@ static int startup_heartbeat_resolution(quicksand_connection *pub,
 			}
 		}
 
-		quicksand_sleep(MASTER_HEARTBEAT_POLL_SLEEP_NS);
+		quicksand_sleep(CORE_HEARTBEAT_POLL_SLEEP_NS);
 	}
 
 	return 0;
@@ -248,7 +248,7 @@ static void add_subscriber(tracked_node *n, const char *topic) {
 // Print current node status
 static void print_status(void) {
 	u64 now = quicksand_now();
-	f64 uptime = quicksand_ns(now, master_start_time) * 1e-9;
+	f64 uptime = quicksand_ns(now, core_start_time) * 1e-9;
 
 	printf("\n=== Node Status (%.1fs) ===\n", uptime);
 	for(int i = 0; i < node_count; i++) {
@@ -572,7 +572,7 @@ int rosecore_main(int argc, char **argv) {
 	quicksand_connection *heartbeat_sub = NULL;
 	mirage_msg *msg = NULL;
 	mirage_msg *query_msg = NULL;
-	int master_claimed = 0;
+	int core_claimed = 0;
 	i64 self_pid = (i64) getpid();
 	int64_t ret = 0;
 
@@ -588,8 +588,8 @@ int rosecore_main(int argc, char **argv) {
 	printf("[rosecore] Opening heartbeat topic: %s\n", heartbeat_topic);
 
 	ret = quicksand_connect(&heartbeat_pub, heartbeat_topic, -1,
-				MASTER_HEARTBEAT_MSG_SIZE,
-				MASTER_HEARTBEAT_RATE, NULL);
+				CORE_HEARTBEAT_MSG_SIZE,
+				CORE_HEARTBEAT_RATE, NULL);
 	if(ret != 0) {
 		fprintf(stderr, "[rosecore] Failed to create heartbeat topic: %ld\n",
 			(long) ret);
@@ -610,7 +610,7 @@ int rosecore_main(int argc, char **argv) {
 		exit_code = 1;
 		goto cleanup;
 	}
-	master_claimed = 1;
+	core_claimed = 1;
 	quicksand_disconnect(&heartbeat_sub, NULL);
 
 	// Build the rosecore topic name: /<ROSE_BASE>/rosecore
@@ -668,9 +668,9 @@ int rosecore_main(int argc, char **argv) {
 		goto cleanup;
 	}
 
-	master_start_time = quicksand_now();
-	u64 last_status_print = master_start_time;
-	u64 last_master_heartbeat = master_start_time;
+	core_start_time = quicksand_now();
+	u64 last_status_print = core_start_time;
+	u64 last_CORE_HEARTBEAT = core_start_time;
 
 	i64 sz = msg->max_length;
 	// quicksand_read_latest(pub, msg->data, &sz); // skip - read historical node data (TODO Alec, 2026: use timestamps to filter old)
@@ -681,11 +681,11 @@ int rosecore_main(int argc, char **argv) {
 
 	while(running) {
 		u64 now = quicksand_now();
-		if(quicksand_ns(now, last_master_heartbeat) >= MASTER_HEARTBEAT_STEADY_PUB_NS) {
-			if(send_master_heartbeat(heartbeat_pub, self_pid) < 0) {
+		if(quicksand_ns(now, last_CORE_HEARTBEAT) >= CORE_HEARTBEAT_STEADY_PUB_NS) {
+			if(send_CORE_HEARTBEAT(heartbeat_pub, self_pid) < 0) {
 				fprintf(stderr, "[rosecore] Failed to publish heartbeat\n");
 			} else {
-				last_master_heartbeat = now;
+				last_CORE_HEARTBEAT = now;
 			}
 		}
 
@@ -735,7 +735,7 @@ cleanup:
 	quicksand_disconnect(&lookup_conn, NULL);
 	quicksand_disconnect(&dump_conn, NULL);
 	quicksand_disconnect(&pub, NULL);
-	if(master_claimed) {
+	if(core_claimed) {
 		cleanup_core_topics(topic, dump_topic, lookup_topic, heartbeat_topic);
 	}
 	return exit_code;

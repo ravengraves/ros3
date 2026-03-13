@@ -40,7 +40,7 @@ setup(
     author="Alec Graves",
     packages=find_packages(),
     ext_modules=[_ros3_ext],
-    install_requires=["mirage"],
+    install_requires=["mirage-format"],
     zip_safe=True,
     python_requires=">=3.9",
 )
