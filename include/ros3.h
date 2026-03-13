@@ -2,15 +2,43 @@
 #define ROS3_H
 
 #include <mirage.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 // quicksand.h is C11-only (_Atomic), so C++ consumers use an opaque pointer.
 typedef struct quicksand_connection quicksand_connection;
 #else
+#if !defined(QUICKSAND_H)
+#define quicksand_read_latest ros3_quicksand_header_read_latest_decl
 #include <quicksand.h>
-#endif
+#undef quicksand_read_latest
 
-#include <stdint.h>
+static inline int64_t quicksand_read_latest(quicksand_connection *connection,
+					    uint8_t *message,
+					    int64_t *message_size) {
+	if(connection->read_index < connection->buffer->index) {
+		connection->read_index = connection->buffer->index - 1;
+		return quicksand_read(connection, message, message_size);
+	}
+	return -1;
+}
+#else
+static inline int64_t ros3_quicksand_read_latest_inline(
+	quicksand_connection *connection,
+	uint8_t *message,
+	int64_t *message_size) {
+	if(connection->read_index < connection->buffer->index) {
+		connection->read_index = connection->buffer->index - 1;
+		return quicksand_read(connection, message, message_size);
+	}
+	return -1;
+}
+
+#ifndef quicksand_read_latest
+#define quicksand_read_latest ros3_quicksand_read_latest_inline
+#endif
+#endif
+#endif
 
 #ifdef __cplusplus
 extern "C" {

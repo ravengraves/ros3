@@ -35,8 +35,12 @@ CFLAGS_LTO := $(CFLAGS_BASE) -flto
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
 CFLAGS_SO := $(CFLAGS_BASE)
 
-CEXE := -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
-LDFLAGS := -fuse-ld=lld
+CEXE := -Wl,-gc-sections,-s
+LDFLAGS :=
+ifeq ($(findstring clang,$(notdir $(CC))),clang)
+	CEXE := -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
+	LDFLAGS := -fuse-ld=lld
+endif
 CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3 -mtune=native
 
 SOURCE := src/ros3.c

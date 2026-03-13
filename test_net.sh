@@ -37,19 +37,21 @@ export ROSE_BASE="test1"
 "$BUILD_DIR/test_net_pub" "$SRC_TOPIC" 50 >/dev/null 2>&1 &
 PID_PUB=$!
 
-sleep 0.1
+# sleep 0.1
 
 # Launch transmitter (subscribes to src, sends to rx)
 "$BUILD_DIR/rosenet_tx" "$SRC_TOPIC" 127.0.0.1 $PORT >/dev/null 2>&1 &
 PID_TX=$!
 
-sleep 0.5
+# sleep 0.3
 
 export ROSE_BASE="test2"
 
 # Launch receiver (creates dst topic)
 "$BUILD_DIR/rosenet_rx" "$DST_TOPIC" $PORT 1024 64 >/dev/null 2>&1 &
 PID_RX=$!
+
+sleep 1.0
 
 pass "Liaison network started"
 

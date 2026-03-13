@@ -369,7 +369,10 @@ static i64 rose_resolve_topic_name(rose_node *n,
 
 	int written = 0;
 	if(name[0] == '/') {
-		written = snprintf(topic, topic_size, "%.*s", (int) nlen, name);
+		if(!rose_topic_to_shm(topic, topic_size, name)) {
+			return rose_last_error_code();
+		}
+		written = (int) strlen(topic);
 	} else {
 		written = snprintf(topic, topic_size, "%s%.*s", n->prefix, (int) nlen, name);
 	}

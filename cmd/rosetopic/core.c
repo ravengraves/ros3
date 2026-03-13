@@ -4,6 +4,7 @@
 //   rosetopic list              - List all topics
 //   rosetopic info <topic>      - Show publishers/subscribers for a topic
 //   rosetopic echo <topic>      - Subscribe and dump messages as hex
+//   rosetopic hz <topic>        - Measure message frequency
 //   rosetopic rm <topic>        - Unlink a topic shared-memory segment
 
 #define _POSIX_C_SOURCE 200809L
@@ -39,6 +40,7 @@ static void print_usage(void) {
 	fprintf(stderr, "  list              - List all topics\n");
 	fprintf(stderr, "  info <topic>      - Show publishers/subscribers\n");
 	fprintf(stderr, "  echo <topic>      - Subscribe and dump hex\n");
+	fprintf(stderr, "  hz <topic>        - Measure message frequency\n");
 	fprintf(stderr, "  rm <topic>        - Unlink a topic shared-memory segment\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Environment:\n");
@@ -71,27 +73,49 @@ static int get_query_poll_step_ms(int timeout_ms) {
 	return 10;
 }
 
-// Convert shm topic name to display format: start from first %, replace % with /
-static void topic_to_display(char *out, size_t out_size, const char *shm_name) {
-	// Skip to first %
-	while(*shm_name && *shm_name != '%') {
-		shm_name++;
+static void build_shm_base_prefix(char *out, size_t out_size) {
+	const char *rose_base = getenv("ROSE_BASE");
+	const char *base = rose_base ? rose_base : "rose";
+	size_t base_len = strlen(base);
+
+	while(base_len > 0 && base[0] == '/') {
+		base += 1;
+		base_len -= 1;
 	}
-	// Copy from first %, replacing % with /
-	size_t i = 0;
-	while(*shm_name && i < out_size - 1) {
-		out[i++] = (*shm_name == '%') ? '/' : *shm_name;
-		shm_name++;
+	while(base_len > 0 && base[base_len - 1] == '/') {
+		base_len -= 1;
 	}
-	out[i] = '\0';
+	if(base_len == 0) {
+		base = "rose";
+		base_len = 4;
+	}
+
+	snprintf(out, out_size, "/%.*s%%", (int) base_len, base);
 }
 
-// Convert user input to shm format: replace / with % (but leave existing % alone)
-static void input_to_shm(char *out, size_t out_size, const char *input) {
+// Convert shm topic name to display format, stripping the ROSE_BASE prefix.
+static void topic_to_display(char *out, size_t out_size, const char *shm_name) {
+	if(!out || out_size == 0) {
+		return;
+	}
+	out[0] = '\0';
+	if(!shm_name || !shm_name[0]) {
+		return;
+	}
+
+	char base_prefix[256];
+	build_shm_base_prefix(base_prefix, sizeof(base_prefix));
+
+	const char *src = shm_name;
+	size_t base_prefix_len = strlen(base_prefix);
+	if(strncmp(shm_name, base_prefix, base_prefix_len) == 0) {
+		src = shm_name + base_prefix_len - 1;
+	}
+
 	size_t i = 0;
-	while(*input && i < out_size - 1) {
-		out[i++] = (*input == '/') ? '%' : *input;
-		input++;
+	while(*src && i < out_size - 1) {
+		out[i++] = (*src == '%') ? '/' : *src;
+		src++;
 	}
 	out[i] = '\0';
 }
@@ -103,11 +127,25 @@ static void build_topic_name(char *buf, size_t buf_size, const char *suffix) {
 	rose_topic_to_shm(buf, buf_size, topic);
 }
 
+static uint8_t *alloc_topic_buffer(quicksand_connection *conn, i64 *buffer_size) {
+	if(!conn || !conn->buffer || conn->buffer->message_size == 0 || !buffer_size) {
+		return NULL;
+	}
+
+	*buffer_size = (i64) conn->buffer->message_size;
+	return (uint8_t *) malloc((size_t) *buffer_size);
+}
+
 // Skip to latest position in ring buffer before sending request
 static void skip_to_latest(quicksand_connection *conn) {
-	uint8_t buf[4096];
-	i64 sz = sizeof(buf);
-	quicksand_read_latest(conn, buf, &sz);
+	i64 buf_size = 0;
+	uint8_t *buf = alloc_topic_buffer(conn, &buf_size);
+	if(!buf) {
+		return;
+	}
+
+	quicksand_read_latest(conn, buf, &buf_size);
+	free(buf);
 }
 
 // Send a DumpAll request
@@ -227,6 +265,30 @@ static int topic_cmp(const void *a, const void *b) {
 	return strcmp((const char *) a, (const char *) b);
 }
 
+static int csv_contains_topic(const char *csv, const char *topic) {
+	if(!csv || !topic || !topic[0]) {
+		return 0;
+	}
+
+	size_t topic_len = strlen(topic);
+	const char *p = csv;
+	while(*p) {
+		const char *start = p;
+		while(*p && *p != ',') {
+			p++;
+		}
+		if((size_t) (p - start) == topic_len
+		   && strncmp(start, topic, topic_len) == 0) {
+			return 1;
+		}
+		if(*p == ',') {
+			p++;
+		}
+	}
+
+	return 0;
+}
+
 // Read responses and collect all unique topics
 static void read_and_print_topics(quicksand_connection *conn) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
@@ -317,7 +379,7 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 				break;
 			} else if(res == 1) {
 				// Check if this node publishes to topic
-				if(strstr(pubs, topic_filter)) {
+				if(csv_contains_topic(pubs, topic_filter)) {
 					if(pub_count < 256) {
 						snprintf(publishers[pub_count], 256, "%.220s (pid %ld)",
 							 name, (long) pid);
@@ -325,7 +387,7 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 					}
 				}
 				// Check if this node subscribes to topic
-				if(strstr(subs, topic_filter)) {
+				if(csv_contains_topic(subs, topic_filter)) {
 					if(sub_count < 256) {
 						snprintf(subscribers[sub_count], 256, "%.220s (pid %ld)",
 							 name, (long) pid);
@@ -426,32 +488,126 @@ static int echo_topic(const char *topic_name) {
 
 	printf("Subscribed to %s (Ctrl+C to stop)\n\n", topic_name);
 
-	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
-	if(!msg) {
-		fprintf(stderr, "Failed to allocate message buffer\n");
+	i64 buf_size = 0;
+	uint8_t *buf = alloc_topic_buffer(sub, &buf_size);
+	if(!buf) {
+		fprintf(stderr, "Failed to allocate topic buffer\n");
 		quicksand_disconnect(&sub, NULL);
 		return 1;
 	}
 
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
+	running = 1;
 
 	u64 msg_num = 0;
 	while(running) {
-		i64 sz = msg->max_length;
-		i64 r = quicksand_read(sub, msg->data, &sz);
+		i64 sz = buf_size;
+		i64 r = quicksand_read(sub, buf, &sz);
 		if(r >= 0) {
 			msg_num++;
 			printf("--- Message %lu (%ld bytes) ---\n",
 			       (unsigned long) msg_num, (long) sz);
-			hex_dump(msg->data, (size_t) sz);
+			hex_dump(buf, (size_t) sz);
 		} else {
-			quicksand_sleep(10e6); // 10ms poll
+			rose_nanosleep(10e6); // 10ms poll
 		}
 	}
 
 	printf("\nStopped.\n");
-	mirage_destroy(&msg, NULL);
+	free(buf);
+	quicksand_disconnect(&sub, NULL);
+	return 0;
+}
+
+static void print_hz_stats(const char *topic_name, u64 interval_count,
+			   f64 total_period, f64 min_period, f64 max_period) {
+	if(!topic_name || interval_count == 0 || total_period <= 0.0) {
+		return;
+	}
+
+	printf("%s: %.3f Hz, period avg %.6fs, min %.6fs, max %.6fs, samples %lu\n",
+	       topic_name,
+	       (f64) interval_count / total_period,
+	       total_period / (f64) interval_count,
+	       min_period,
+	       max_period,
+	       (unsigned long) interval_count);
+	fflush(stdout);
+}
+
+static int hz_topic(const char *topic_name) {
+	char shm_name[512];
+	rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name);
+
+	quicksand_connection *sub = NULL;
+	int64_t ret = quicksand_connect(&sub, shm_name, -1, 0, 0, NULL);
+	if(ret != 0) {
+		fprintf(stderr, "Failed to subscribe to %s (shm: %s)\n",
+			topic_name, shm_name);
+		return 1;
+	}
+
+	i64 buf_size = 0;
+	uint8_t *buf = alloc_topic_buffer(sub, &buf_size);
+	if(!buf) {
+		fprintf(stderr, "Failed to allocate topic buffer\n");
+		quicksand_disconnect(&sub, NULL);
+		return 1;
+	}
+
+	signal(SIGINT, handle_signal);
+	signal(SIGTERM, handle_signal);
+	running = 1;
+
+	skip_to_latest(sub);
+	printf("Measuring %s (Ctrl+C to stop)\n", topic_name);
+	printf("Waiting for messages...\n");
+
+	u64 prev_msg_time = 0;
+	u64 last_report = rose_now();
+	u64 interval_count = 0;
+	f64 total_period = 0.0;
+	f64 min_period = 0.0;
+	f64 max_period = 0.0;
+
+	while(running) {
+		i64 sz = buf_size;
+		i64 r = quicksand_read(sub, buf, &sz);
+		if(r >= 0) {
+			u64 now = rose_now();
+			if(prev_msg_time != 0) {
+				f64 period = rose_seconds(now, prev_msg_time);
+				total_period += period;
+				if(interval_count == 0 || period < min_period) {
+					min_period = period;
+				}
+				if(interval_count == 0 || period > max_period) {
+					max_period = period;
+				}
+				interval_count++;
+			}
+			prev_msg_time = now;
+		} else {
+			rose_nanosleep(10e6); // 10ms poll
+		}
+
+		if(interval_count > 0 && rose_elapsed_seconds(last_report) >= 1.0) {
+			print_hz_stats(topic_name, interval_count, total_period,
+				       min_period, max_period);
+			last_report = rose_now();
+			interval_count = 0;
+			total_period = 0.0;
+			min_period = 0.0;
+			max_period = 0.0;
+		}
+	}
+
+	print_hz_stats(topic_name, interval_count, total_period,
+		       min_period, max_period);
+	printf("Stopped.\n");
+
+	free(buf);
 	quicksand_disconnect(&sub, NULL);
 	return 0;
 }
@@ -518,9 +674,12 @@ int rosetopic_main(int argc, char **argv) {
 			goto cleanup;
 		}
 
-		// Convert user input: / -> %
 		char topic_filter[256];
-		input_to_shm(topic_filter, sizeof(topic_filter), argv[2]);
+		if(!rose_topic_to_shm(topic_filter, sizeof(topic_filter), argv[2])) {
+			fprintf(stderr, "Failed to normalize topic %s\n", argv[2]);
+			exit_code = 1;
+			goto cleanup;
+		}
 
 		skip_to_latest(conn);
 		send_dump_request(conn);
@@ -534,6 +693,15 @@ int rosetopic_main(int argc, char **argv) {
 		}
 
 		return echo_topic(argv[2]);
+
+	} else if(strcmp(cmd, "hz") == 0) {
+		if(argc < 3) {
+			print_usage();
+			exit_code = 1;
+			goto cleanup;
+		}
+
+		return hz_topic(argv[2]);
 
 	} else if(strcmp(cmd, "rm") == 0) {
 		if(argc < 3) {

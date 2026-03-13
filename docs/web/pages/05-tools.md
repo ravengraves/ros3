@@ -4,7 +4,7 @@
 
 - `rosecore`: node/topic registry and query endpoint
 - `rosenode`: inspect/kill nodes
-- `rosetopic`: list/inspect/echo/remove topics
+- `rosetopic`: list/inspect/echo/measure/remove topics
 - `rosenet_tx`: bridge local topic to TCP/UDP
 - `rosenet_rx`: bridge TCP/UDP to local topic
 - `roseserial`: serial device bridge for microcontrollers
@@ -39,6 +39,7 @@ Commands and options:
 - `rosetopic list`
 - `rosetopic info <topic>`
 - `rosetopic echo <topic>`
+- `rosetopic hz <topic>`
 - `rosetopic rm <topic>`
 
 ### rosenet_tx
@@ -89,6 +90,9 @@ rosetopic info /camera
 
 # stream payload bytes from a topic
 rosetopic echo /camera
+
+# measure topic rate
+rosetopic hz /camera
 
 # unlink a topic shared-memory segment
 rosetopic rm /camera

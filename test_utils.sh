@@ -16,6 +16,24 @@ export ROSE_BASE="test"
 pass() { echo -e "${GREEN}PASS${NC}: $1"; }
 fail() { echo -e "${RED}FAIL${NC}: $1"; cleanup; exit 1; }
 
+wait_for_nonempty_output() {
+    local __outvar="$1"
+    shift
+
+    local output=""
+    local attempt
+    for attempt in $(seq 1 50); do
+        if output=$("$@" 2>&1) && [ -n "$output" ]; then
+            printf -v "$__outvar" '%s' "$output"
+            return 0
+        fi
+        sleep 0.1
+    done
+
+    printf -v "$__outvar" '%s' "$output"
+    return 1
+}
+
 expect_echo_fail() {
     local topic="$1"
 
@@ -33,17 +51,29 @@ expect_echo_fail() {
     [ $? -ne 0 ]
 }
 
+remove_topic() {
+    "$BUILD_DIR/rosetopic" rm "$1" >/dev/null 2>&1 || true
+}
+
+cleanup_topics() {
+    remove_topic /chatter
+    remove_topic /rosecore
+    remove_topic /rosecore_dump
+    remove_topic /rosecore_lookup
+    remove_topic /rosecore_heartbeat
+}
+
 cleanup() {
     trap - EXIT INT TERM
     [ -n "$TEST_PID" ] && kill "$TEST_PID" 2>/dev/null || true
     [ -n "$SECOND_MASTER_PID" ] && kill "$SECOND_MASTER_PID" 2>/dev/null || true
     [ -n "$MASTER_PID" ] && kill "$MASTER_PID" 2>/dev/null || true
-    rm -f "/dev/shm/${ROSE_BASE}%"* 2>/dev/null || true
+    cleanup_topics
 }
 trap cleanup EXIT INT TERM
 
-# Clean leftover shm
-rm -f "/dev/shm/${ROSE_BASE}%"* 2>/dev/null || true
+# Clean leftover topics from prior runs.
+cleanup_topics
 
 # Launch rosecore and test node (all use same ROSE_BASE)
 "$BUILD_DIR/rosecore" >/dev/null 2>&1 &
@@ -67,20 +97,17 @@ pass "rosecore duplicate startup rejection"
 "$BUILD_DIR/test" >/dev/null 2>&1 &
 TEST_PID=$!
 
-# Give rosecore/node time to register topics before querying.
-sleep 0.6
-
-# Run all queries
-NODE_OUTPUT=$("$BUILD_DIR/rosenode" list 2>&1)
-[ -n "$NODE_OUTPUT" ] || fail "rosenode list empty"
+# Run all queries once rosecore/node registration is visible.
+wait_for_nonempty_output NODE_OUTPUT "$BUILD_DIR/rosenode" list \
+    || fail "rosenode list empty"
 pass "rosenode list"
 
-INFO_OUTPUT=$("$BUILD_DIR/rosenode" info demo 2>&1)
-[ -n "$INFO_OUTPUT" ] || fail "rosenode info empty"
+wait_for_nonempty_output INFO_OUTPUT "$BUILD_DIR/rosenode" info demo \
+    || fail "rosenode info empty"
 pass "rosenode info"
 
-TOPIC_OUTPUT=$("$BUILD_DIR/rosetopic" list 2>&1)
-[ -n "$TOPIC_OUTPUT" ] || fail "rosetopic list empty"
+wait_for_nonempty_output TOPIC_OUTPUT "$BUILD_DIR/rosetopic" list \
+    || fail "rosetopic list empty"
 pass "rosetopic list"
 
 "$BUILD_DIR/rosetopic" rm /chatter >/dev/null 2>&1 || fail "rosetopic rm /chatter"
