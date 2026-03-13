@@ -7,16 +7,15 @@ It is a ROS-like robotics runtime layer with lightning-fast system introspection
 ## Performance
 In `rosbench`, comparing ROS3 shared-memory against ROS2 single-process component runs over different communication topologies (averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2 Jazzy, with message sizes ranging from 32B to 1KiB):
 
-- Unicast (1:1): ros3 achieves `124.0x` higher throughput and `275,597.8x` lower latency
-- Pipeline (1:a:b:c): ros3 achieves `118.1x` higher throughput and `28.8x` lower latency
-- Sequencer (many:1): ros3 achieves `407.3x` higher throughput and `44.2x` lower latency
-- Multicast (1:many): ros3 achieves `148.1x` higher throughput and `167,314.6x` lower latency
-- Diamond (1:2:1): ros3 achieves `1,137.9x` higher throughput and `41.2x` lower latency
+- Unicast (1:1): ros3 achieves **124.0x** higher throughput and **275,597.8x** lower latency
+- Pipeline (1:a:b:c): ros3 achieves **118.1x** higher throughput and **28.8x** lower latency
+- Sequencer (many:1): ros3 achieves **407.3x** higher throughput and **44.2x** lower latency
+- Multicast (1:many): ros3 achieves **148.1x** higher throughput and **167,314.6x** lower latency
+- Diamond (1:2:1): ros3 achieves **1,137.9x** higher throughput and **41.2x** lower latency
 
 (and ROS3 is only hitting ~3.47% of theoretical RAM bandwidth for these message sizes. This could be further optimized with batched message reading.)
 
 See [rosbench](https://git.sr.ht/~alecgraves/rosbench/) for the full benchmark tables and plots.
-
 
 **Build Speed**
 > AMD Ryzen 5 7600X 6-Core Processor
@@ -29,7 +28,27 @@ user	0m2.540s
 sys	0m0.729s
 ```
 
-Compared to ROS2, this is about ~1000x-2000x faster? I have not build ros2 from source for a long time, but it used to requre ~80 packages, or ~100 if counting colcon extensions?
+ros2 (manually trimmed build, no tests):
+- rclc-based minimal build: 371.43s wall clock, 109 total built packages
+- rclcpp-based minimal build: 453.77s wall clock, 108 total built packages
+
+This makes ROS3 builds about ~350x-450x faster than ROS2.
+
+**Installation Size**
+d
+ROS3:
+
+```
+$ ls -sh build/
+1.4M    build
+```
+
+ROS2:
+- rclcpp: 68.6M
+- rclc: 45.6M
+
+ROS3 is only ~45-60x smaller for a minimal install (though this was with `-O3` for ROS3, vs MinSizeRel / `-O2`).
+
 
 ## Usage - C 🚀
 
