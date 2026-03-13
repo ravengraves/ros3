@@ -4,6 +4,7 @@ ros3 is a lightweight and high-performance pub/sub middleware for robotic system
 
 It is a ROS-like robotics runtime layer with lightning-fast system introspection tools and optional network and serial transports. ROS3 uses [quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding.
 
+## Performance
 In `rosbench`, comparing ROS3 shared-memory against ROS2 single-process component runs over different communication topologies (averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2 Jazzy, with message sizes ranging from 32B to 1KiB):
 
 - Unicast (1:1): ros3 achieves `124.0x` higher throughput and `275,597.8x` lower latency
@@ -15,6 +16,20 @@ In `rosbench`, comparing ROS3 shared-memory against ROS2 single-process componen
 (and ROS3 is only hitting ~3.47% of theoretical RAM bandwidth for these message sizes. This could be further optimized with batched message reading.)
 
 See [rosbench](https://git.sr.ht/~alecgraves/rosbench/) for the full benchmark tables and plots.
+
+
+**Build Speed**
+> AMD Ryzen 5 7600X 6-Core Processor
+
+```
+$ time bash -c "make -C quicksand -j4 && make -C mirage -j4 && make -C ros3 -j4"
+...
+real	0m1.034s
+user	0m2.540s
+sys	0m0.729s
+```
+
+Compared to ROS2, this is about ~1000x-2000x faster? I have not build ros2 from source for a long time, but it used to requre ~80 packages, or ~100 if counting colcon extensions?
 
 ## Usage - C 🚀
 
