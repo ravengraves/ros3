@@ -69,6 +69,7 @@ static void print_usage(const char *argv0) {
 
 static void handle_signal(int sig) {
 	(void) sig;
+	fprintf(stderr, "[rosecore] Rosebud...\n");
 	running = 0;
 }
 
