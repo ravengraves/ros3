@@ -4,9 +4,9 @@ ros3 is a lightweight and high-performance pub/sub middleware for robotic system
 
 It is a ROS-like robotics runtime layer with lightning-fast system introspection tools and optional network and serial transports. ROS3 uses [quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding.
 
-Build status:
-* Ubuntu: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml?)
-* Debian: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml?)
+**Build status:**
+* Debian Testing: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml?)
+* Ubuntu 22.04 LTS: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml?)
 
 
 ## Performance
