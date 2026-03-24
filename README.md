@@ -218,16 +218,16 @@ Shared environment:
 
 ## Web Docs 📚
 
-- [Build and Installation](doc/web/pages/00-build-install.md)
-- [Project Setup](doc/web/pages/01-project-setup.md)
-- [Pub/Sub in C](doc/web/pages/02-pubsub-c.md)
-- [Pub/Sub in C++](doc/web/pages/03-pubsub-cpp.md)
-- [Pub/Sub in Python](doc/web/pages/04-pubsub-python.md)
-- [ROS3 Tools](doc/web/pages/05-tools.md)
-- [roseserial](doc/web/pages/06-roseserial.md)
-- [Multi-machine Usage](doc/web/pages/07-multi-machine.md)
-- [Mirage Datatypes Used by ROS3](doc/web/pages/08-mirage-datatypes.md)
-- [Package Control (Git Subtree)](doc/web/pages/09-package-control-subtree.md)
+- [Build and Installation](docs/web/pages/00-build-install.md)
+- [Project Setup](docs/web/pages/01-project-setup.md)
+- [Pub/Sub in C](docs/web/pages/02-pubsub-c.md)
+- [Pub/Sub in C++](docs/web/pages/03-pubsub-cpp.md)
+- [Pub/Sub in Python](docs/web/pages/04-pubsub-python.md)
+- [ROS3 Tools](docs/web/pages/05-tools.md)
+- [roseserial](docs/web/pages/06-roseserial.md)
+- [Multi-machine Usage](docs/web/pages/07-multi-machine.md)
+- [Mirage Datatypes Used by ROS3](docs/web/pages/08-mirage-datatypes.md)
+- [Package Control (Git Subtree)](docs/web/pages/09-package-control-subtree.md)
 
 ## Analysis
 

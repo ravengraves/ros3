@@ -30,7 +30,7 @@ LOCAL_STATIC_LIBS := $(abspath $(MIRAGE_DIR)/build/libmirage.a) $(abspath $(QUIC
 
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
-	-fno-stack-protector -D_FORTIFY_SOURCE=0 \
+	-fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
 	-Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 CFLAGS_LTO := $(CFLAGS_BASE) -flto
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
@@ -80,11 +80,11 @@ ANALYZE_CFLAGS = $(filter-out -flto -Werror -Wpedantic,$(CFLAGS_LTO))
 ANALYZE_CXXFLAGS = $(filter-out -Werror -Wpedantic,$(CXXFLAGS))
 
 MAN_PAGES := rosecore.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
-DOC_SOURCE_DIR := doc/man/man1
-DOC_BUILD_DIR := $(BUILD_DIR)/doc/man/man1
+DOC_SOURCE_DIR := docs/man/man1
+DOC_BUILD_DIR := $(BUILD_DIR)/docs/man/man1
 DOC_BUILD_TARGETS := $(addprefix $(DOC_BUILD_DIR)/,$(MAN_PAGES))
-WEBDOC_SCRIPT := doc/web/build.sh
-WEBDOC_SOURCES := $(WEBDOC_SCRIPT) doc/web/index.html doc/web/logo.svg $(wildcard doc/web/pages/*.md)
+WEBDOC_SCRIPT := docs/web/build.sh
+WEBDOC_SOURCES := $(WEBDOC_SCRIPT) docs/web/index.html docs/web/logo.svg $(wildcard docs/web/pages/*.md)
 
 BIN_INSTALL_DIR := $(DESTDIR)$(PREFIX)/bin
 LIB_INSTALL_DIR := $(DESTDIR)$(PREFIX)/lib

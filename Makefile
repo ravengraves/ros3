@@ -29,7 +29,7 @@ LOCAL_STATIC_LIBS := $(abspath $(MIRAGE_DIR)/build/libmirage.a) $(abspath $(QUIC
 
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
-	-fno-stack-protector -D_FORTIFY_SOURCE=0 \
+	-fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
 	-Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3 -mtune=native
 CFLAGS_LTO := $(CFLAGS_BASE) -flto
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
@@ -80,11 +80,11 @@ ANALYZE_CXXFLAGS = $(filter-out -Werror -Wpedantic,$(CXXFLAGS))
 CLANG_TIDY_CHECKS ?= -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
 MAN_PAGES := rosecore.1 rosenode.1 rosetopic.1 rosenet_tx.1 rosenet_rx.1 roseserial.1
-DOC_SOURCE_DIR := doc/man/man1
-DOC_BUILD_DIR := $(BUILD_DIR)/doc/man/man1
+DOC_SOURCE_DIR := docs/man/man1
+DOC_BUILD_DIR := $(BUILD_DIR)/docs/man/man1
 DOC_BUILD_TARGETS := $(addprefix $(DOC_BUILD_DIR)/,$(MAN_PAGES))
-WEBDOC_SCRIPT := doc/web/build.sh
-WEBDOC_SOURCES := $(WEBDOC_SCRIPT) doc/web/index.html doc/web/logo.svg $(wildcard doc/web/pages/*.md)
+WEBDOC_SCRIPT := docs/web/build.sh
+WEBDOC_SOURCES := $(WEBDOC_SCRIPT) docs/web/index.html docs/web/logo.svg $(wildcard docs/web/pages/*.md)
 
 DEP_SHARED_LIBS := -L$(PREFIX)/lib -Wl,-rpath,$(PREFIX)/lib -lmirage -lquicksand
 DEP_STATIC_LIBS := $(PREFIX)/lib/libmirage.a $(PREFIX)/lib/libquicksand.a
@@ -264,15 +264,15 @@ install-bin: $(BIN_TARGETS)
 	install -m 0755 $(BIN_TARGETS) $(BIN_INSTALL_DIR)/
 	install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/ros3.bash
 
-install-docs:
-	mkdir -p $(DOC_INSTALL_DIR)
-	install -m 0644 $(DOC_BUILD_TARGETS) $(DOC_INSTALL_DIR)/
-
 install-lib: $(LIB_TARGETS) $(PC_FILE)
 	mkdir -p $(LIB_INSTALL_DIR) $(INCLUDE_INSTALL_DIR) $(PKGCONFIG_INSTALL_DIR)
 	install -m 0644 $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a $(LIB_INSTALL_DIR)/
 	install -m 0644 $(HEADER) $(INCLUDE_INSTALL_DIR)/ros3.h
 	install -m 0644 $(PC_FILE) $(PKGCONFIG_INSTALL_DIR)/ros3.pc
+
+install-docs:
+	mkdir -p $(DOC_INSTALL_DIR)
+	install -m 0644 $(DOC_BUILD_TARGETS) $(DOC_INSTALL_DIR)/
 
 install: install-lib install-bin
 

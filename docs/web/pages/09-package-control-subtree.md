@@ -1,9 +1,21 @@
-## Package Control (Git Subtree)
+## ROS3 Development Tips
 
-ROS3 projects prefer `git subtree` for package control and vendoring.
-This keeps builds reproducible and atomic during competition prep.
+ROS3 projects prefer `git subtree` for package control and dependency vendoring.
 
-### Recommended layout
+This keeps builds reproducible and atomic during robotics competition and demo prep as well as during production deployment.
+Code you use is your responsibility as a developer, and it is therefore advantageous to actually have offline local access to all sources depended upon by your project.
+
+### Why the following project structure is preferred for ROS3
+
+- one repo snapshot contains all required code
+- stable and repeatable builds without surprise upstream changes
+- easy rollback by reverting one commit
+- controlled update windows between competition milestones
+- package source stays self-contained under `src/packageX/`
+- installed artifacts still land in the standard workspace `bin/`, `lib/`, `include/`, and `share/` trees - or optionally can be installed globally on minimal unix distributions into standard directories (e.g., `/usr/local/`)
+
+
+### Recommended Structure
 
 ```text
 rose_ws/
@@ -16,7 +28,7 @@ rose_ws/
           node1_math.c
         node2/
           main.c
-      libs/  # source for exported/installed libraries
+      libraries/  # source for exported/installed libraries
         exported_lib1/
           src/
           include/
@@ -28,7 +40,7 @@ rose_ws/
         some_external_project_subtree/
       scripts/
         my_tool.py
-      doc/
+      docs/
       test/
         check_1.c
         check_1.sh
@@ -40,6 +52,7 @@ rose_ws/
   lib/      # installed library files (.so/.a)
   include/  # installed headers (.h)
   share/    # installed config/data/weights
+  Makefile  # build script (Makefile or build.ninja preferred)
 ```
 
 Treat each `src/packageX/` directory as a package source root.
@@ -56,15 +69,19 @@ That means:
 Within a package:
 
 - `cmd/` contains executable entrypoints such as nodes and small tools
-- `libs/` contains source for exported libraries that will be installed
-- `internal/` contains package-private code used by `cmd/` and `libs/`, but not installed as public API
+- `libraries/` contains source for exported libraries that will be installed
+- `internal/` contains package-private code used by `cmd/` and `libraries/`, but not installed as public API
 - `vendor/` contains vendored dependencies brought in via `git subtree`
 - `scripts/` contains package-local helper scripts
-- `doc/` contains package-local documentation and manpage sources
+- `docs/` contains package-local documentation and manpage sources
 - `test/` contains checks, fixtures, and test scripts
 
 Do not install `internal/` headers into the workspace `include/` tree.
 Only install public headers from exported libraries.
+
+## Using `git subtree`
+
+Subtree is a minimal tool for maintaining an internal copy of a git repository in your own git repository.
 
 ### Add vendored dependencies
 
@@ -86,57 +103,22 @@ git subtree pull --prefix "$PKG/vendor/mirage" https://git.sr.ht/~alecgraves/mir
 git subtree pull --prefix "$PKG/vendor/quicksand" https://git.sr.ht/~alecgraves/quicksand master --squash
 ```
 
-### Why this is preferred for ROS3
+## Build Target Conventions
 
-- one repo snapshot contains all required code
-- stable and repeatable builds without surprise upstream changes
-- easy rollback by reverting one commit
-- controlled update windows between competition milestones
-- package source stays self-contained under `src/packageX/`
-- installed artifacts still land in the standard workspace `bin/`, `lib/`, `include/`, and `share/` trees
-
-### Build against vendored deps
-
-```bash
-WS="$PWD"
-PKG=src/package1
-
-make -C "$PKG/vendor/mirage" PREFIX="$WS" install
-make -C "$PKG/vendor/quicksand" PREFIX="$WS" install
-make -C "$PKG/vendor/ros3" PREFIX="$WS" \
-  MIRAGE_DIR="$WS/$PKG/vendor/mirage" \
-  QUICKSAND_DIR="$WS/$PKG/vendor/quicksand" \
-  install
-
-cc -I"$WS/include" \
-  "$PKG/cmd/node1/main.c" \
-  "$PKG/cmd/node1/node1_math.c" \
-  -L"$WS/lib" \
-  -lros3 -lmirage -lquicksand \
-  -o "$WS/bin/node1"
-```
-
-On macOS, use the Darwin makefiles where the vendored project provides one:
-
-```bash
-WS="$PWD"
-PKG=src/package1
-
-make -C "$PKG/vendor/mirage" PREFIX="$WS" install
-make -C "$PKG/vendor/quicksand" -f Makefile.darwin PREFIX="$WS" install
-make -C "$PKG/vendor/ros3" -f Makefile.darwin PREFIX="$WS" \
-  MIRAGE_DIR="$WS/$PKG/vendor/mirage" \
-  QUICKSAND_DIR="$WS/$PKG/vendor/quicksand" \
-  install
-```
-
-### Package install conventions
+The following build command (Makefile/ninja) targets are recommended:
+- all - default, builds executables and libraries
+- cmd - build rose nodes
+- libraries - build rose libraries (.a/.so)
+- check - run sanitizers and checks
+- docs - build docs
+- install - install 
+- install-docs - install manpages
 
 When `package1` is built and installed into the workspace:
 
 - `cmd/node1/` builds an executable such as `rose_ws/bin/node1`
-- `libs/exported_lib1/include/` installs public headers into `rose_ws/include/`
-- `libs/exported_lib1/src/` builds a library into `rose_ws/lib/`
+- `libraries/exported_lib1/include/` installs public headers into `rose_ws/include/`
+- `libraries/exported_lib1/src/` builds a library into `rose_ws/lib/`
 - `internal/internal_library_1/` is compiled as needed but not installed publicly
 - runtime assets such as config, maps, calibration files, and model blobs should install into `rose_ws/share/package1/`
 
@@ -156,7 +138,7 @@ rose_ws/
 ### Practical notes
 
 - Prefer one owning package for each vendored dependency to avoid duplicate subtree copies.
-- Keep `cmd/*/main.c` thin; move reusable logic into `libs/` or `internal/`.
+- Keep `cmd/*/main.c` thin; move reusable logic into `libraries/` or `internal/`.
 - If a helper is only used inside one node, keep it local to that node directory.
 - If a helper is shared across nodes in the package but should not be public, put it in `internal/`.
-- If other packages are expected to link against it, promote it into `libs/`.
+- If other packages are expected to link against it, promote it into `libraries/`.
