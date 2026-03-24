@@ -7,7 +7,6 @@ It is a ROS-like robotics runtime layer with lightning-fast system introspection
 Build status:
 * Ubuntu: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml?)
 * Debian: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml?)
-* aarch64: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/aarch64.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/aarch64.yml?)
 
 
 ## Performance
