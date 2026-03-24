@@ -1,0 +1,45 @@
+image: debian/stable
+packages:
+  - git
+  - build-essential
+  - ninja-build
+  - pkgconf
+  - scdoc
+  - llvm
+  - lld
+  - clang
+  - libclang-rt-dev
+  - clang-tidy
+  - clang-format
+  - cloc
+  - python3-pip
+  - python3-dev
+
+sources:
+  - https://git.sr.ht/~alecgraves/mirage
+  - https://git.sr.ht/~alecgraves/quicksand
+  - https://git.sr.ht/~alecgraves/ros3
+
+tasks:
+  - setup: |
+      # mirage
+      make -j"$(nproc)" -C mirage all docs
+      make -C mirage check
+      sudo make -C mirage install install-docs
+      make -C mirage python
+
+      # quicksand
+      make -j"$(nproc)" -C quicksand all docs
+      make -C quicksand check
+      sudo make -C quicksand install install-docs
+      make -C quicksand python
+
+  - build: |
+      cd ros3
+      make -j"$(nproc)"
+      make docs
+      sudo make install
+      sudo make install-docs
+  - test: |
+      cd ros3
+      make check

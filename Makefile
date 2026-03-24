@@ -255,9 +255,14 @@ sanitize-check: sanitize-deps
 	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
 	$(MAKE) BUILD_DIR=$(SANITIZE_BUILD_DIR) SANITIZE=1 check-runtime
 
-analysis: check-analysis
+check-quality:
+	if [ "$$(cat $$(find src -name *.c) | grep -v '^[[:space:]]*//' | wc -l)" -gt "10000" ]; \
+		then echo "Too many lines. Fix your trash code."; \
+		exit 1; \
+	fi
+	echo "linecount: $$(cat $$(find src -name *.c) | grep -v '^[[:space:]]*//' | wc -l)"
 
-check: check-analysis sanitize-check
+check: check-analysis sanitize-check check-quality
 
 install-bin: $(BIN_TARGETS)
 	mkdir -p $(BIN_INSTALL_DIR) $(COMPLETION_INSTALL_DIR)
