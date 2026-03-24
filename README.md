@@ -4,6 +4,12 @@ ros3 is a lightweight and high-performance pub/sub middleware for robotic system
 
 It is a ROS-like robotics runtime layer with lightning-fast system introspection tools and optional network and serial transports. ROS3 uses [quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding.
 
+Build status:
+* Ubuntu: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/ubuntu22.yml?)
+* Debian: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/debian.yml?)
+* aarch64: [![builds.sr.ht status](https://builds.sr.ht/~alecgraves/ros3/commits/master/aarch64.yml.svg)](https://builds.sr.ht/~alecgraves/ros3/commits/master/aarch64.yml?)
+
+
 ## Performance
 In `rosbench`, comparing ROS3 shared-memory against ROS2 single-process component runs over different communication topologies (averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2 Jazzy, with message sizes ranging from 32B to 1KiB):
 

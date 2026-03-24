@@ -40,6 +40,10 @@ tasks:
       make docs
       sudo make install
       sudo make install-docs
+      sudo ldconfig
+      make python
+
   - test: |
       cd ros3
       make check
+      make check-python

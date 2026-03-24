@@ -36,12 +36,17 @@ tasks:
 
       # fix llvm14 aslr bug with newer kernels (https://github.com/actions/runner/issues/3481)
       sudo sysctl vm.mmap_rnd_bits=28
+
   - build: |
       cd ros3
       make -j"$(nproc)"
       make docs
       sudo make install
       sudo make install-docs
+      sudo ldconfig
+      make python
+
   - test: |
       cd ros3
       make check
+      make check-python

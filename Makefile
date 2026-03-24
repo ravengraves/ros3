@@ -30,7 +30,7 @@ LOCAL_STATIC_LIBS := $(abspath $(MIRAGE_DIR)/build/libmirage.a) $(abspath $(QUIC
 CFLAGS_BASE := -Wall -Wextra -Wpedantic -Werror -std=c11 -fPIC \
 	-ffunction-sections -fdata-sections \
 	-fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
-	-Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3 -mtune=native
+	-Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 CFLAGS_LTO := $(CFLAGS_BASE) -flto
 CFLAGS_GCC_LTO := $(CFLAGS_BASE) -flto -Wno-pedantic
 CFLAGS_SO := $(CFLAGS_BASE)
@@ -41,7 +41,7 @@ ifeq ($(findstring clang,$(notdir $(CC))),clang)
 	CEXE := -fuse-ld=lld -Wl,-gc-sections,-icf=safe,-s
 	LDFLAGS := -fuse-ld=lld
 endif
-CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3 -mtune=native
+CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 
 SOURCE := src/ros3.c
 HEADER := include/ros3.h
@@ -97,17 +97,19 @@ DOC_INSTALL_DIR := $(DESTDIR)$(PREFIX)/share/man/man1
 COMPLETION_INSTALL_DIR := $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 
 ifeq ($(ARCH),x86_64)
-	CFLAGS_BASE += -march=native
-	CFLAGS_LTO += -march=native
-	CFLAGS_GCC_LTO += -march=native
-	CFLAGS_SO += -march=native
+	CFLAGS_BASE += -march=native -mtune=native
+	CFLAGS_LTO += -march=native -mtune=native
+	CFLAGS_GCC_LTO += -march=native -mtune=native
+	CFLAGS_SO += -march=native -mtune=native
+	CXXFLAGS += -march=native -mtune=native
 endif
 
 ifeq ($(ARCH),aarch64)
-	CFLAGS_BASE += -march=armv8-a
-	CFLAGS_LTO += -march=armv8-a
-	CFLAGS_GCC_LTO += -march=armv8-a
-	CFLAGS_SO += -march=armv8-a
+	CFLAGS_BASE += -mcpu=native
+	CFLAGS_LTO += -mcpu=native
+	CFLAGS_GCC_LTO += -mcpu=native
+	CFLAGS_SO += -mcpu=native
+	CXXFLAGS += -mcpu=native
 endif
 
 ifeq ($(SANITIZE),1)
