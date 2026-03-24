@@ -18,6 +18,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#define ROSESERIAL_IO_TIMEOUT_MS 1000
+
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
 	    || strcmp(arg, "--help") == 0
@@ -93,6 +95,104 @@ static int serial_open(const char *device, int baud) {
 	return fd;
 }
 
+static ssize_t read_exact(int fd, uint8_t *buf, size_t len, int timeout_ms) {
+	size_t off = 0;
+	u64 start = rose_now();
+
+	while(off < len) {
+		ssize_t n = read(fd, buf + off, len - off);
+		if(n > 0) {
+			off += (size_t) n;
+			continue;
+		}
+		if(n == 0) {
+			return -1;
+		}
+		if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+			return -1;
+		}
+
+		f64 elapsed_ns = rose_nanoseconds(rose_now(), start);
+		int remaining_ms = timeout_ms - (int) (elapsed_ns / 1000000.0);
+		if(remaining_ms <= 0) {
+			return -1;
+		}
+
+		struct pollfd pfd = {.fd = fd, .events = POLLIN};
+		int pr = poll(&pfd, 1, remaining_ms);
+		if(pr > 0) {
+			if(pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				return -1;
+			}
+			continue;
+		}
+		if(pr == 0) {
+			return -1;
+		}
+		if(errno != EINTR) {
+			return -1;
+		}
+	}
+
+	return (ssize_t) off;
+}
+
+static ssize_t write_exact(int fd, const uint8_t *buf, size_t len, int timeout_ms) {
+	size_t off = 0;
+	u64 start = rose_now();
+
+	while(off < len) {
+		ssize_t n = write(fd, buf + off, len - off);
+		if(n > 0) {
+			off += (size_t) n;
+			continue;
+		}
+		if(n == 0) {
+			return -1;
+		}
+		if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+			return -1;
+		}
+
+		f64 elapsed_ns = rose_nanoseconds(rose_now(), start);
+		int remaining_ms = timeout_ms - (int) (elapsed_ns / 1000000.0);
+		if(remaining_ms <= 0) {
+			return -1;
+		}
+
+		struct pollfd pfd = {.fd = fd, .events = POLLOUT};
+		int pr = poll(&pfd, 1, remaining_ms);
+		if(pr > 0) {
+			if(pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+				return -1;
+			}
+			continue;
+		}
+		if(pr == 0) {
+			return -1;
+		}
+		if(errno != EINTR) {
+			return -1;
+		}
+	}
+
+	return (ssize_t) off;
+}
+
+static int discard_exact(int fd, size_t len, int timeout_ms) {
+	uint8_t scratch[256];
+
+	while(len > 0) {
+		size_t chunk = len < sizeof(scratch) ? len : sizeof(scratch);
+		if(read_exact(fd, scratch, chunk, timeout_ms) != (ssize_t) chunk) {
+			return -1;
+		}
+		len -= chunk;
+	}
+
+	return 0;
+}
+
 int roseserial_main(int argc, char **argv) {
 	if(argc > 1 && is_help_arg(argv[1])) {
 		print_usage(argv[0]);
@@ -131,44 +231,64 @@ int roseserial_main(int argc, char **argv) {
 	// TX: topic -> serial (we subscribe)
 	rose_subscriber *tx_sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
 
-	if(!rx_pub || !tx_sub) {
+	if(!rx_pub) {
 		fprintf(stderr, "Failed to create topics\n");
 		if(close(fd) != 0) {}
 		return 1;
 	}
 
 	rose_info("%s @ %d | rx:%s tx:%s", device, baud, rx_topic, tx_topic);
+	if(!tx_sub) {
+		rose_info("TX topic %s not available yet; retrying every 1s", tx_topic);
+	}
 
 	mirage_msg *msg = mirage_create(msg_size, NULL);
 	uint8_t hdr[2];
+	u64 last_tx_sub_attempt = rose_now();
 
 	while(rose_ok(node)) {
 		struct pollfd pfd = {.fd = fd, .events = POLLIN};
 		poll(&pfd, 1, 10);
 
+		if(!tx_sub && rose_elapsed_seconds(last_tx_sub_attempt) >= 1.0) {
+			tx_sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
+			last_tx_sub_attempt = rose_now();
+			if(tx_sub) {
+				rose_info("Connected TX topic %s", tx_topic);
+			}
+		}
+
 		// Serial -> RX topic
 		if(pfd.revents & POLLIN) {
-			if(read(fd, hdr, 2) == 2) {
+			if(read_exact(fd, hdr, sizeof(hdr), ROSESERIAL_IO_TIMEOUT_MS)
+			   == (ssize_t) sizeof(hdr)) {
 				uint16_t len = hdr[0] | (hdr[1] << 8);
 				if(len <= msg_size) {
-					ssize_t n = read(fd, msg->data, len);
-					if(n == len) {
+					ssize_t n = read_exact(fd, msg->data, len,
+							     ROSESERIAL_IO_TIMEOUT_MS);
+					if(n == (ssize_t) len) {
+						msg->length = len;
 						msg->cursor = len;
 						rose_publish(rx_pub, msg);
 					}
+				} else if(discard_exact(fd, len, ROSESERIAL_IO_TIMEOUT_MS) != 0) {
+					break;
 				}
 			}
 		}
 
 		// TX topic -> Serial
 		msg->length = msg->max_length;
-		if(rose_read(tx_sub, msg) >= 0) {
+		if(tx_sub && rose_read(tx_sub, msg) >= 0) {
 			hdr[0] = msg->length & 0xFF;
 			hdr[1] = (msg->length >> 8) & 0xFF;
-			if(write(fd, hdr, 2) != 2) {
+			if(write_exact(fd, hdr, sizeof(hdr), ROSESERIAL_IO_TIMEOUT_MS)
+			   != (ssize_t) sizeof(hdr)) {
 				break;
 			}
-			if(write(fd, msg->data, msg->length) != msg->length) {
+			if(write_exact(fd, msg->data, msg->length,
+				       ROSESERIAL_IO_TIMEOUT_MS)
+			   != (ssize_t) msg->length) {
 				break;
 			}
 		}

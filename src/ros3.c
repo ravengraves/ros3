@@ -96,10 +96,27 @@ static void rose_record_errorv(i64 code, const char *fmt, va_list ap) {
 	(void) fflush(stderr);
 }
 
+static void rose_record_error_silentv(i64 code, const char *fmt, va_list ap) {
+	ROSE_LAST_ERROR_CODE = code;
+	if(!fmt) {
+		ROSE_LAST_ERROR[0] = '\0';
+		return;
+	}
+
+	vsnprintf(ROSE_LAST_ERROR, sizeof(ROSE_LAST_ERROR), fmt, ap);
+}
+
 static void rose_record_error(i64 code, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
 	rose_record_errorv(code, fmt, ap);
+	va_end(ap);
+}
+
+static void rose_record_error_silent(i64 code, const char *fmt, ...) {
+	va_list ap;
+	va_start(ap, fmt);
+	rose_record_error_silentv(code, fmt, ap);
 	va_end(ap);
 }
 
@@ -1212,12 +1229,21 @@ rose_subscriber *rose_create_sub(rose_node *n,
 	if(ret != 0) {
 		char code_buf[128];
 		rose_format_errno_code(ret, code_buf, sizeof(code_buf));
-		rose_record_error(ret,
-				  "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
-				  topic,
-				  code_buf,
-				  rose_connect_meaning(ret, 0),
-				  rose_connect_suggestion(ret, 0));
+		if(ret == -ENOENT) {
+			rose_record_error_silent(ret,
+					 "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
+					 topic,
+					 code_buf,
+					 rose_connect_meaning(ret, 0),
+					 rose_connect_suggestion(ret, 0));
+		} else {
+			rose_record_error(ret,
+					  "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
+					  topic,
+					  code_buf,
+					  rose_connect_meaning(ret, 0),
+					  rose_connect_suggestion(ret, 0));
+		}
 		sub->sub = NULL;
 		return NULL;
 	}

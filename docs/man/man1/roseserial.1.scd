@@ -11,6 +11,9 @@ roseserial - bidirectional serial bridge for ROS3 topics
 # DESCRIPTION
 
 Bridges a serial device and ROS3 topics using a length-prefixed frame format.
+If _tx_topic_ does not exist yet, _roseserial_ keeps running and retries that
+subscription once per second while continuing to publish serial frames to
+_rx_topic_.
 
 # EXAMPLES
 

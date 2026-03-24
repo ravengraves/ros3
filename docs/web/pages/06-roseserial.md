@@ -8,6 +8,10 @@
 roseserial /dev/ttyUSB0 /mcu/rx /mcu/tx 115200 1024 256
 ```
 
+If `tx_topic` does not exist yet, `roseserial` keeps running and retries that
+subscription once per second. The serial -> `rx_topic` path continues working
+immediately.
+
 ### Frame format
 
 - 2-byte little-endian payload length

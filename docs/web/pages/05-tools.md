@@ -71,6 +71,8 @@ Commands and options:
 ### roseserial
 
 Topic: serial microcontroller bridge to ROS3 topics.
+If the TX topic is missing at startup, `roseserial` keeps running and retries
+the subscriber connection once per second.
 
 Commands and options:
 
