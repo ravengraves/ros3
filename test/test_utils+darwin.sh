@@ -34,6 +34,34 @@ expect_echo_fail() {
     [ $? -ne 0 ]
 }
 
+expect_echo_skips_stale() {
+    local topic="$1"
+    local echo_log
+
+    echo_log="$(mktemp)"
+
+    if ! "$BUILD_DIR/test_net_pub" "$topic" 5 >/dev/null 2>&1; then
+        rm -f "$echo_log"
+        return 1
+    fi
+
+    "$BUILD_DIR/rosetopic" echo "$topic" >"$echo_log" 2>&1 &
+    local pid=$!
+    sleep 0.3
+
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+
+    if grep -q '^--- Message ' "$echo_log"; then
+        cat "$echo_log"
+        rm -f "$echo_log"
+        return 1
+    fi
+
+    rm -f "$echo_log"
+    return 0
+}
+
 cleanup() {
     trap - EXIT INT TERM
     [ -n "$TEST_PID" ] && kill "$TEST_PID" 2>/dev/null || true
@@ -79,6 +107,10 @@ pass "rosenode info"
 TOPIC_OUTPUT=$("$BUILD_DIR/rosetopic" list 2>&1)
 [ -n "$TOPIC_OUTPUT" ] || fail "rosetopic list empty"
 pass "rosetopic list"
+
+expect_echo_skips_stale /echo_stale || fail "rosetopic echo printed stale buffered messages"
+"$BUILD_DIR/rosetopic" rm /echo_stale >/dev/null 2>&1 || true
+pass "rosetopic echo skips stale backlog"
 
 "$BUILD_DIR/rosetopic" rm /chatter >/dev/null 2>&1 || fail "rosetopic rm /chatter"
 expect_echo_fail /chatter || fail "rosetopic rm left /chatter connectable"

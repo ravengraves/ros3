@@ -10,7 +10,7 @@ It is a ROS-like robotics runtime layer with lightning-fast system introspection
 
 
 ## Performance
-ROS3 can achieve **387.08x** higher throughput and **88,605.32x** lower-latency than ROS2 on average with default settings: In [rosbench](https://git.sr.ht/~alecgraves/rosbench/), comparing ROS3 shared-memory against ROS2 single-process component runs over different communication topologies (averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2 Jazzy, with message sizes ranging from 32B to 1KiB):
+ROS3 can achieve **387.08x** higher throughput and **88,605.32x** lower-latency than ROS2 on average with default settings. In [rosbench](https://git.sr.ht/~alecgraves/rosbench/), comparing ROS3 shared-memory against ROS2 single-process component runs over different communication topologies (averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2 Jazzy, with message sizes ranging from 32B to 1KiB):
 
 - Unicast (1:1): ros3 achieves **124.0x** higher throughput and **275,597.8x** lower latency
 - Pipeline (1:a:b:c): ros3 achieves **118.1x** higher throughput and **28.8x** lower latency
@@ -232,7 +232,7 @@ Shared environment:
 - [roseserial](docs/web/pages/06-roseserial.md)
 - [Multi-machine Usage](docs/web/pages/07-multi-machine.md)
 - [Mirage Datatypes Used by ROS3](docs/web/pages/08-mirage-datatypes.md)
-- [Package Control (Git Subtree)](docs/web/pages/09-package-control-subtree.md)
+- [ROS3 Developer Guide](docs/web/pages/09-package-control-subtree.md)
 
 ## Analysis
 

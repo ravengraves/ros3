@@ -46,6 +46,7 @@ CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_I
 SOURCE := src/ros3.c
 HEADER := include/ros3.h
 COMPLETION_BASH := cmd/ros3.bash
+COMPLETION_COMMANDS := rosecore rosenode rosetopic rosenet_tx rosenet_rx roseserial
 PC_FILE := $(BUILD_DIR)/ros3.pc
 
 LIB_TARGETS := $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a
@@ -88,6 +89,7 @@ WEBDOC_SOURCES := $(WEBDOC_SCRIPT) docs/web/index.html docs/web/logo.svg $(wildc
 
 DEP_SHARED_LIBS := -L$(PREFIX)/lib -Wl,-rpath,$(PREFIX)/lib -lmirage -lquicksand
 DEP_STATIC_LIBS := $(PREFIX)/lib/libmirage.a $(PREFIX)/lib/libquicksand.a
+ROSETOPIC_LIBS := -lm
 
 BIN_INSTALL_DIR := $(DESTDIR)$(PREFIX)/bin
 LIB_INSTALL_DIR := $(DESTDIR)$(PREFIX)/lib
@@ -159,7 +161,7 @@ $(BUILD_DIR)/rosenode: cmd/rosenode/main+posix.c cmd/rosenode/core.c cmd/rosenod
 	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenode/main+posix.c cmd/rosenode/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/rosetopic: cmd/rosetopic/main+posix.c cmd/rosetopic/core.c cmd/rosetopic/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosetopic/main+posix.c cmd/rosetopic/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosetopic/main+posix.c cmd/rosetopic/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS) $(ROSETOPIC_LIBS)
 
 $(BUILD_DIR)/rosenet_tx: cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c cmd/rosenet_tx/core.h $(BUILD_DIR)/libros3.a
 	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
@@ -270,6 +272,7 @@ install-bin: $(BIN_TARGETS)
 	mkdir -p $(BIN_INSTALL_DIR) $(COMPLETION_INSTALL_DIR)
 	install -m 0755 $(BIN_TARGETS) $(BIN_INSTALL_DIR)/
 	install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/ros3.bash
+	for cmd in $(COMPLETION_COMMANDS); do install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/$$cmd; done
 
 install-lib: $(LIB_TARGETS) $(PC_FILE)
 	mkdir -p $(LIB_INSTALL_DIR) $(INCLUDE_INSTALL_DIR) $(PKGCONFIG_INSTALL_DIR)
@@ -287,6 +290,7 @@ uninstall-bin:
 	rm -f $(BIN_INSTALL_DIR)/rosecore $(BIN_INSTALL_DIR)/rosenode $(BIN_INSTALL_DIR)/rosetopic
 	rm -f $(BIN_INSTALL_DIR)/rosenet_tx $(BIN_INSTALL_DIR)/rosenet_rx $(BIN_INSTALL_DIR)/roseserial
 	rm -f $(COMPLETION_INSTALL_DIR)/ros3.bash
+	rm -f $(addprefix $(COMPLETION_INSTALL_DIR)/,$(COMPLETION_COMMANDS))
 
 uninstall-docs:
 	rm -f $(addprefix $(DOC_INSTALL_DIR)/,$(MAN_PAGES))

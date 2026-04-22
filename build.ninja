@@ -49,7 +49,7 @@ rule gcc_ar
   description = GCC_AR $out
 
 rule link_c
-  command = deps_lib=$${PREFIX:-/usr/local}/lib deps_inc=$${PREFIX:-/usr/local}/include && $cc $cflags_lto -I$$deps_inc $cexe -o $out $in $lib $$deps_lib/libmirage.a $$deps_lib/libquicksand.a
+  command = deps_lib=$${PREFIX:-/usr/local}/lib deps_inc=$${PREFIX:-/usr/local}/include && $cc $cflags_lto -I$$deps_inc $cexe -o $out $in $lib $$deps_lib/libmirage.a $$deps_lib/libquicksand.a $libs
   description = LINK_C $out
 
 rule link_cpp
@@ -96,6 +96,7 @@ build $builddir/rosenode: link_c cmd/rosenode/main+posix.c cmd/rosenode/core.c |
   lib = $builddir/libros3.a
 build $builddir/rosetopic: link_c cmd/rosetopic/main+posix.c cmd/rosetopic/core.c | $builddir/libros3.a
   lib = $builddir/libros3.a
+  libs = -lm
 build $builddir/rosenet_tx: link_c cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c | $builddir/libros3.a
   lib = $builddir/libros3.a
 build $builddir/rosenet_rx: link_c cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c | $builddir/libros3.a
@@ -151,7 +152,7 @@ build .ninja-webdocs.stamp: run FORCE | docs/web/build.sh docs/web/index.html do
   name = webdocs
 
 build .ninja-install-bin.stamp: run FORCE | $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial
-  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/bin $$dest$$prefix/share/bash-completion/completions && install -m 0755 $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial $$dest$$prefix/bin/ && install -m 0644 cmd/ros3.bash $$dest$$prefix/share/bash-completion/completions/ros3.bash && touch .ninja-install-bin.stamp
+  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; compdir=$$dest$$prefix/share/bash-completion/completions; mkdir -p $$dest$$prefix/bin $$compdir && install -m 0755 $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial $$dest$$prefix/bin/ && install -m 0644 cmd/ros3.bash $$compdir/ros3.bash && for cmd in rosecore rosenode rosetopic rosenet_tx rosenet_rx roseserial; do install -m 0644 cmd/ros3.bash $$compdir/$$cmd; done && touch .ninja-install-bin.stamp
   name = install-bin
 
 build .ninja-install-docs.stamp: run FORCE | $builddir/docs/man/man1/rosecore.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1
@@ -163,7 +164,7 @@ build .ninja-install-lib.stamp: run FORCE | $builddir/libros3.so $builddir/libro
   name = install-lib
 
 build .ninja-uninstall-bin.stamp: run FORCE
-  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; rm -f $$dest$$prefix/bin/rosecore $$dest$$prefix/bin/rosenode $$dest$$prefix/bin/rosetopic $$dest$$prefix/bin/rosenet_tx $$dest$$prefix/bin/rosenet_rx $$dest$$prefix/bin/roseserial $$dest$$prefix/share/bash-completion/completions/ros3.bash && touch .ninja-uninstall-bin.stamp
+  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; compdir=$$dest$$prefix/share/bash-completion/completions; rm -f $$dest$$prefix/bin/rosecore $$dest$$prefix/bin/rosenode $$dest$$prefix/bin/rosetopic $$dest$$prefix/bin/rosenet_tx $$dest$$prefix/bin/rosenet_rx $$dest$$prefix/bin/roseserial $$compdir/ros3.bash $$compdir/rosecore $$compdir/rosenode $$compdir/rosetopic $$compdir/rosenet_tx $$compdir/rosenet_rx $$compdir/roseserial && touch .ninja-uninstall-bin.stamp
   name = uninstall-bin
 
 build .ninja-uninstall-docs.stamp: run FORCE

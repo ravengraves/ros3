@@ -13,6 +13,7 @@
 #include "ros3.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,9 +139,21 @@ static uint8_t *alloc_topic_buffer(quicksand_connection *conn, i64 *buffer_size)
 
 // Skip to latest position in ring buffer before sending request
 static void skip_to_latest(quicksand_connection *conn) {
+	if(!conn || !conn->buffer) {
+		return;
+	}
+
+	if(conn->buffer->message_size == 0) {
+		conn->read_index = conn->buffer->index;
+		conn->read_stamp = quicksand_now();
+		return;
+	}
+
 	i64 buf_size = 0;
 	uint8_t *buf = alloc_topic_buffer(conn, &buf_size);
 	if(!buf) {
+		conn->read_index = conn->buffer->index;
+		conn->read_stamp = quicksand_now();
 		return;
 	}
 
@@ -486,6 +499,8 @@ static int echo_topic(const char *topic_name) {
 		return 1;
 	}
 
+	skip_to_latest(sub);
+
 	printf("Subscribed to %s (Ctrl+C to stop)\n\n", topic_name);
 
 	i64 buf_size = 0;
@@ -521,19 +536,126 @@ static int echo_topic(const char *topic_name) {
 }
 
 static void print_hz_stats(const char *topic_name, u64 interval_count,
-			   f64 total_period, f64 min_period, f64 max_period) {
+			   f64 total_period, f64 total_period_sq,
+			   f64 min_period, f64 max_period) {
 	if(!topic_name || interval_count == 0 || total_period <= 0.0) {
 		return;
 	}
 
-	printf("%s: %.3f Hz, period avg %.6fs, min %.6fs, max %.6fs, samples %lu\n",
+	f64 mean_period = total_period / (f64) interval_count;
+	f64 variance = 0.0;
+	f64 stddev = 0.0;
+	if(interval_count > 1) {
+		f64 centered_sum = total_period_sq - ((f64) interval_count) * mean_period * mean_period;
+		if(centered_sum < 0.0) {
+			centered_sum = 0.0;
+		}
+		variance = centered_sum / (f64) (interval_count - 1);
+		stddev = sqrt(variance);
+	}
+
+	printf("%s: %.3f Hz, period avg %.6fs, std %.6fs, min %.6fs, max %.6fs, samples %lu\n",
 	       topic_name,
 	       (f64) interval_count / total_period,
-	       total_period / (f64) interval_count,
+	       mean_period,
+	       stddev,
 	       min_period,
 	       max_period,
 	       (unsigned long) interval_count);
 	fflush(stdout);
+}
+
+static u64 hz_ring_data_offset(void) {
+	u64 offset = (u64) sizeof(quicksand_ringbuffer);
+	u64 rem = offset & 63u;
+	if(rem == 0u) {
+		return offset;
+	}
+	return offset + (64u - rem);
+}
+
+static void hz_record_period(u64 msg_time,
+			     u64 *prev_msg_time,
+			     u64 *interval_count,
+			     f64 *total_period,
+			     f64 *total_period_sq,
+			     f64 *min_period,
+			     f64 *max_period) {
+	if(!prev_msg_time || !interval_count || !total_period
+	   || !total_period_sq || !min_period || !max_period) {
+		return;
+	}
+
+	if(*prev_msg_time != 0 && msg_time > *prev_msg_time) {
+		f64 period = rose_seconds(msg_time, *prev_msg_time);
+		*total_period += period;
+		*total_period_sq += period * period;
+		if(*interval_count == 0 || period < *min_period) {
+			*min_period = period;
+		}
+		if(*interval_count == 0 || period > *max_period) {
+			*max_period = period;
+		}
+		*interval_count += 1;
+	}
+	*prev_msg_time = msg_time;
+}
+
+static void hz_sample_ring(quicksand_connection *conn,
+			   u64 *last_seen_index,
+			   u64 *prev_msg_time,
+			   u64 *interval_count,
+			   f64 *total_period,
+			   f64 *total_period_sq,
+			   f64 *min_period,
+			   f64 *max_period) {
+	u64 write_cursor = 0;
+	u64 ring_length = 0;
+	u64 slot_size = 0;
+	u64 data_offset = 0;
+	u64 start_index = 0;
+	u64 cursor = 0;
+	const u8 *base = NULL;
+
+	if(!conn || !conn->buffer || !last_seen_index) {
+		return;
+	}
+
+	write_cursor = atomic_load_explicit(&conn->buffer->index, memory_order_acquire);
+	if(write_cursor == *last_seen_index) {
+		return;
+	}
+
+	ring_length = conn->buffer->length;
+	slot_size = conn->buffer->message_size;
+	if(ring_length == 0 || slot_size < 16) {
+		*last_seen_index = write_cursor;
+		return;
+	}
+
+	start_index = *last_seen_index;
+	if(start_index > write_cursor) {
+		start_index = write_cursor;
+	}
+	if(write_cursor - start_index > ring_length) {
+		start_index = write_cursor - ring_length;
+	}
+
+	data_offset = hz_ring_data_offset();
+	base = (const u8 *) conn->buffer;
+	for(cursor = start_index; cursor < write_cursor; cursor += 1) {
+		u64 slot = cursor & (ring_length - 1u);
+		const u8 *slot_ptr = base + data_offset + slot * slot_size;
+		u64 msg_time = 0;
+		memcpy(&msg_time, slot_ptr, sizeof(msg_time));
+		if(msg_time == 0) {
+			continue;
+		}
+		hz_record_period(msg_time, prev_msg_time, interval_count,
+				 total_period, total_period_sq,
+				 min_period, max_period);
+	}
+	*last_seen_index = write_cursor;
 }
 
 static int hz_topic(const char *topic_name) {
@@ -548,66 +670,52 @@ static int hz_topic(const char *topic_name) {
 		return 1;
 	}
 
-	i64 buf_size = 0;
-	uint8_t *buf = alloc_topic_buffer(sub, &buf_size);
-	if(!buf) {
-		fprintf(stderr, "Failed to allocate topic buffer\n");
-		quicksand_disconnect(&sub, NULL);
-		return 1;
-	}
-
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 	running = 1;
 
-	skip_to_latest(sub);
 	printf("Measuring %s (Ctrl+C to stop)\n", topic_name);
 	printf("Waiting for messages...\n");
 
 	u64 prev_msg_time = 0;
 	u64 last_report = rose_now();
+	u64 last_seen_index = 0;
 	u64 interval_count = 0;
 	f64 total_period = 0.0;
+	f64 total_period_sq = 0.0;
 	f64 min_period = 0.0;
 	f64 max_period = 0.0;
 
+	if(sub->buffer) {
+		last_seen_index = atomic_load_explicit(&sub->buffer->index,
+						       memory_order_acquire);
+	}
+
 	while(running) {
-		i64 sz = buf_size;
-		i64 r = quicksand_read(sub, buf, &sz);
-		if(r >= 0) {
-			u64 now = rose_now();
-			if(prev_msg_time != 0) {
-				f64 period = rose_seconds(now, prev_msg_time);
-				total_period += period;
-				if(interval_count == 0 || period < min_period) {
-					min_period = period;
-				}
-				if(interval_count == 0 || period > max_period) {
-					max_period = period;
-				}
-				interval_count++;
-			}
-			prev_msg_time = now;
-		} else {
+		u64 before = last_seen_index;
+		hz_sample_ring(sub, &last_seen_index, &prev_msg_time,
+			       &interval_count, &total_period, &total_period_sq,
+			       &min_period, &max_period);
+		if(last_seen_index == before) {
 			rose_nanosleep(10e6); // 10ms poll
 		}
 
 		if(interval_count > 0 && rose_elapsed_seconds(last_report) >= 1.0) {
-			print_hz_stats(topic_name, interval_count, total_period,
+			print_hz_stats(topic_name, interval_count, total_period, total_period_sq,
 				       min_period, max_period);
 			last_report = rose_now();
 			interval_count = 0;
 			total_period = 0.0;
+			total_period_sq = 0.0;
 			min_period = 0.0;
 			max_period = 0.0;
 		}
 	}
 
-	print_hz_stats(topic_name, interval_count, total_period,
+	print_hz_stats(topic_name, interval_count, total_period, total_period_sq,
 		       min_period, max_period);
 	printf("Stopped.\n");
 
-	free(buf);
 	quicksand_disconnect(&sub, NULL);
 	return 0;
 }
