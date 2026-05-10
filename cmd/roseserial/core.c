@@ -230,6 +230,7 @@ int roseserial_main(int argc, char **argv) {
 	rose_publisher *rx_pub = rose_create_pub(node, (char *) rx_topic, -1, msg_size, slots);
 	// TX: topic -> serial (we subscribe)
 	rose_subscriber *tx_sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
+	char log_msg[256];
 
 	if(!rx_pub) {
 		fprintf(stderr, "Failed to create topics\n");
@@ -237,9 +238,11 @@ int roseserial_main(int argc, char **argv) {
 		return 1;
 	}
 
-	rose_info("%s @ %d | rx:%s tx:%s", device, baud, rx_topic, tx_topic);
+	(void) snprintf(log_msg, sizeof(log_msg), "%s @ %d | rx:%s tx:%s", device, baud, rx_topic, tx_topic);
+	(void) rose_info(log_msg, -1);
 	if(!tx_sub) {
-		rose_info("TX topic %s not available yet; retrying every 1s", tx_topic);
+		(void) snprintf(log_msg, sizeof(log_msg), "TX topic %s not available yet; retrying every 1s", tx_topic);
+		(void) rose_info(log_msg, -1);
 	}
 
 	mirage_msg *msg = mirage_create(msg_size, NULL);
@@ -254,7 +257,8 @@ int roseserial_main(int argc, char **argv) {
 			tx_sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
 			last_tx_sub_attempt = rose_now();
 			if(tx_sub) {
-				rose_info("Connected TX topic %s", tx_topic);
+				(void) snprintf(log_msg, sizeof(log_msg), "Connected TX topic %s", tx_topic);
+				(void) rose_info(log_msg, -1);
 			}
 		}
 

@@ -33,6 +33,10 @@ from .ros3 import (
     elapsed_nanoseconds,
     timer_calibrate,
     topic_to_shm,
+    log_info,
+    log_warn,
+    log_error,
+    log_fatal,
 )
 
 # Keep elapsed_seconds as alias for compatibility
@@ -42,4 +46,5 @@ __version__ = "1.0.0"
 __all__ = [
     "Node", "Publisher", "Subscriber", "Rate",
     "sleep", "now", "elapsed",
+    "ROSE_LOG_INFO", "ROSE_LOG_WARN", "ROSE_LOG_ERROR", "ROSE_LOG_FATAL",
 ]

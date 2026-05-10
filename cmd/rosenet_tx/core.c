@@ -130,6 +130,7 @@ int rosenet_tx_main(int argc, char **argv) {
 	int use_udp = has_flag(argc, argv, "--udp");
 	i64 message_size = find_arg_i64(argc, argv, "--message_size", 0);
 	i64 read_last = find_arg_i64(argc, argv, "--read_last", 0);
+	char log_msg[256];
 
 	// Fall back to positional: <topic> <host> <port> [--udp]
 	if(!topic && argc >= 2 && !is_option_token(argv[1])) topic = argv[1];
@@ -186,7 +187,8 @@ int rosenet_tx_main(int argc, char **argv) {
 	}
 
 	if(!use_udp) {
-		rose_info("Connecting to %s:%lld (TCP)...", host, (long long) port);
+		(void) snprintf(log_msg, sizeof(log_msg), "Connecting to %s:%lld (TCP)...", host, (long long) port);
+		(void) rose_info(log_msg, -1);
 		while(rose_ok(node)) {
 			if(connect(sock, (struct sockaddr *) &addr, sizeof(addr)) == 0) {
 				break;
@@ -198,9 +200,11 @@ int rosenet_tx_main(int argc, char **argv) {
 		if(!rose_ok(node)) return 1;
 		int flag = 1;
 		setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-		rose_info("Connected to %s:%lld", host, (long long) port);
+		(void) snprintf(log_msg, sizeof(log_msg), "Connected to %s:%lld", host, (long long) port);
+		(void) rose_info(log_msg, -1);
 	} else {
-		rose_info("Sending to %s:%lld (UDP)", host, (long long) port);
+		(void) snprintf(log_msg, sizeof(log_msg), "Sending to %s:%lld (UDP)", host, (long long) port);
+		(void) rose_info(log_msg, -1);
 	}
 
 	// Main loop: spin while data flows, sleep after 1ms idle
@@ -222,7 +226,8 @@ int rosenet_tx_main(int argc, char **argv) {
 				if(send_frame(sock, msg->data, len) < 0) break;
 			}
 			if(++count % 10000 == 0) {
-				rose_info("Sent %lu messages", (unsigned long) count);
+				(void) snprintf(log_msg, sizeof(log_msg), "Sent %lu messages", (unsigned long) count);
+				(void) rose_info(log_msg, -1);
 			}
 		} else {
 			++idle_spins;                                                      

@@ -98,6 +98,7 @@ static rose_node *(*p_rose_create_node)(char *, int64_t, char *, int64_t,
 static void (*p_rose_shutdown)(rose_node *) = NULL;
 static int64_t (*p_rose_ok)(rose_node *) = NULL;
 static const char *(*p_rose_last_error)(void) = NULL;
+static void (*p_rose_log)(rose_node *, int, const char *, int64_t) = NULL;
 
 /* Publisher/Subscriber */
 static rose_publisher *(*p_rose_create_pub)(rose_node *, char *, int64_t,
@@ -344,6 +345,32 @@ py_rose_ok(PyObject *self, PyObject *arg) {
 	Py_END_ALLOW_THREADS;
 
 	return PyBool_FromLong(result);
+}
+
+static PyObject *
+py_rose_log(PyObject *self, PyObject *args) {
+	PyObject *node_capsule, *data_obj;
+	int level;
+	Py_buffer view;
+
+	if (!PyArg_ParseTuple(args, "OiO", &node_capsule, &level, &data_obj)) {
+		return NULL;
+	}
+
+	rose_node *node = node_from_capsule(node_capsule);
+	if (!node) return NULL;
+
+	if (PyObject_GetBuffer(data_obj, &view, PyBUF_SIMPLE) < 0) {
+		return NULL;
+	}
+
+	Py_BEGIN_ALLOW_THREADS;
+	p_rose_log(node, level, (const char *)view.buf, (int64_t)view.len);
+	Py_END_ALLOW_THREADS;
+
+	PyBuffer_Release(&view);
+
+	Py_RETURN_NONE;
 }
 
 /* Publisher/Subscriber */
@@ -706,6 +733,7 @@ static PyMethodDef Ros3Methods[] = {
      "Create a ROS3 node."},
     {"shutdown", py_rose_shutdown, METH_O, "Shutdown a node."},
     {"ok", py_rose_ok, METH_O, "Check if node is OK and send heartbeat."},
+    {"log", py_rose_log, METH_VARARGS, "Log a byte-counted message."},
 
     /* Publisher/Subscriber */
     {"create_pub", py_rose_create_pub, METH_VARARGS, "Create a publisher."},
@@ -799,6 +827,7 @@ PyInit__ros3(void) {
 	if (load_symbol(lib_handle, "rose_shutdown", (void **)&p_rose_shutdown) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_ok", (void **)&p_rose_ok) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_last_error", (void **)&p_rose_last_error) < 0) return NULL;
+	if (load_symbol(lib_handle, "rose_log", (void **)&p_rose_log) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_create_pub", (void **)&p_rose_create_pub) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_create_sub", (void **)&p_rose_create_sub) < 0) return NULL;
 	if (load_symbol(lib_handle, "rose_delete_subscriber", (void **)&p_rose_delete_subscriber) < 0) return NULL;
@@ -829,6 +858,10 @@ PyInit__ros3(void) {
 	PyModule_AddIntConstant(m, "ROSE_ERR_BADDATA", -2);
 	PyModule_AddIntConstant(m, "ROSE_ERR_BUFFERSIZE", -4);
 	PyModule_AddIntConstant(m, "ROSE_ERR_BADINPUT", -8);
+	PyModule_AddIntConstant(m, "ROSE_LOG_INFO", ROSE_LOG_INFO);
+	PyModule_AddIntConstant(m, "ROSE_LOG_WARN", ROSE_LOG_WARN);
+	PyModule_AddIntConstant(m, "ROSE_LOG_ERROR", ROSE_LOG_ERROR);
+	PyModule_AddIntConstant(m, "ROSE_LOG_FATAL", ROSE_LOG_FATAL);
 
 	return m;
 }

@@ -17,7 +17,9 @@ static void cb(mirage_msg *msg) {
 		return;
 	}
 
-	rose_info("got: '%.*s', %f\n", (int) str_len, str, val);
+	char log_msg[128];
+	(void) snprintf(log_msg, sizeof(log_msg), "got: '%.*s', %f", (int) str_len, str, val);
+	(void) rose_info(log_msg, -1);
 }
 
 

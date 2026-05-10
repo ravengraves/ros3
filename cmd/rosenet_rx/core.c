@@ -116,6 +116,7 @@ int rosenet_rx_main(int argc, char **argv) {
 		// Backward-compatible alias.
 		message_rate = find_arg_i64(argc, argv, "--queue_depth", 0);
 	}
+	char log_msg[256];
 
 	// Fall back to positional: <topic> <port> <msg_size> <slots> [--udp]
 	i64 pos_msg_size = 0;
@@ -205,7 +206,8 @@ int rosenet_rx_main(int argc, char **argv) {
 	int client = sock;
 	if(!use_udp) {
 		listen(sock, 1);
-		rose_info("Waiting for TCP on port %lld...", (long long) port);
+		(void) snprintf(log_msg, sizeof(log_msg), "Waiting for TCP on port %lld...", (long long) port);
+		(void) rose_info(log_msg, -1);
 		client = accept(sock, NULL, NULL);
 		if(client < 0) {
 			perror("accept");
@@ -215,9 +217,11 @@ int rosenet_rx_main(int argc, char **argv) {
 		int flag = 1;
 		setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 		if(close(sock) != 0) {}
-		rose_info("Connected on port %lld", (long long) port);
+		(void) snprintf(log_msg, sizeof(log_msg), "Connected on port %lld", (long long) port);
+		(void) rose_info(log_msg, -1);
 	} else {
-		rose_info("Listening for UDP on port %lld", (long long) port);
+		(void) snprintf(log_msg, sizeof(log_msg), "Listening for UDP on port %lld", (long long) port);
+		(void) rose_info(log_msg, -1);
 	}
 
 	// Main loop: try non-blocking recv first, fall back to poll on EAGAIN
@@ -260,7 +264,8 @@ int rosenet_rx_main(int argc, char **argv) {
 			msg->cursor = n;
 			rose_publish(pub, msg);
 			if(++count % 10000 == 0) {
-				rose_info("Received %lu messages", (unsigned long) count);
+				(void) snprintf(log_msg, sizeof(log_msg), "Received %lu messages", (unsigned long) count);
+				(void) rose_info(log_msg, -1);
 			}
 		}
 	}

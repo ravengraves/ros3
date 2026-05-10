@@ -157,18 +157,26 @@ i64 rose_get_param(rose_node *n, char *param_name, i64 param_name_length,
 i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
 		   mirage_msg *param);
 
-/// ---------------- Parameters ------------------------------------------------
+/// ---------------- Logging ---------------------------------------------------
 
-void rose_log(rose_node *node,
-	      int level,
-	      const char *fmt,
-	      ...);
+typedef enum {
+	ROSE_LOG_INFO = 0,
+	ROSE_LOG_WARN = 1,
+	ROSE_LOG_ERROR = 2,
+	ROSE_LOG_FATAL = 3
+} rose_log_level;
 
-// Convenience wrappers that use the last crated node.
-void rose_info(const char *fmt, ...);
-void rose_warn(const char *fmt, ...);
-void rose_error(const char *fmt, ...);
-void rose_fatal(const char *fmt, ...);
+// Log a preformatted byte-counted message. Use message_length=-1 for strlen.
+// Logs are best-effort and use a 512-byte internal roselog message slot;
+// oversize messages are truncated before console output and roselog publish,
+// and a warning is printed to stderr.
+void rose_log(rose_node *node, int level, const char *message, i64 message_length);
+
+// Convenience wrappers that use the last created node.
+void rose_info(const char *message, i64 message_length);
+void rose_warn(const char *message, i64 message_length);
+void rose_error(const char *message, i64 message_length);
+void rose_fatal(const char *message, i64 message_length);
 
 
 /// ---------------- Time Measurement ------------------------------------------

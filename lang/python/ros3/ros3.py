@@ -22,6 +22,17 @@ from . import _ros3 as _c
 
 import mirage  # Required dependency for message encoding/decoding
 
+log_info = _c.ROSE_LOG_INFO
+log_warn = _c.ROSE_LOG_WARN
+log_error = _c.ROSE_LOG_ERROR
+log_fatal = _c.ROSE_LOG_FATAL
+
+
+def _coerce_log_message(message: str | bytes | bytearray | memoryview) -> Any:
+    if isinstance(message, str):
+        return message.encode("utf-8")
+    return message
+
 
 # =============================================================================
 # Core Classes
@@ -65,6 +76,26 @@ class Node:
         to rosecore (rate-limited internally).
         """
         return _c.ok(self._capsule)
+
+    def log(self, level: int, message: str | bytes | bytearray | memoryview) -> None:
+        """Log a message through this node."""
+        _c.log(self._capsule, level, _coerce_log_message(message))
+
+    def info(self, message: str | bytes | bytearray | memoryview) -> None:
+        """Log an informational message through this node."""
+        self.log(ROSE_LOG_INFO, message)
+
+    def warn(self, message: str | bytes | bytearray | memoryview) -> None:
+        """Log a warning message through this node."""
+        self.log(ROSE_LOG_WARN, message)
+
+    def error(self, message: str | bytes | bytearray | memoryview) -> None:
+        """Log an error message through this node."""
+        self.log(ROSE_LOG_ERROR, message)
+
+    def fatal(self, message: str | bytes | bytearray | memoryview) -> None:
+        """Log a fatal message through this node."""
+        self.log(ROSE_LOG_FATAL, message)
 
     def shutdown(self) -> None:
         """Shutdown the node and release resources."""

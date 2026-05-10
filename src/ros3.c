@@ -24,6 +24,7 @@
 #define MAX_PUBSUB 256			 // at most n pubsubs
 #define MAX_MESSAGE_SIZE (1920 * 1080 * 3) // max size for a "spin'd" message
 #define ROSE_ERROR_BUFFER_SIZE 1024
+#define ROSE_LOG_MESSAGE_SIZE 512
 
 static rose_node *ROSE_STATIC_NODE = NULL;
 static _Thread_local char ROSE_LAST_ERROR[ROSE_ERROR_BUFFER_SIZE] = {0};
@@ -1045,7 +1046,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	n->rosecore_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
-	rose_connect_with_retry(n, &n->log_pub.pub, topic, 1024, 8192, "roselog publisher");
+	rose_connect_with_retry(n, &n->log_pub.pub, topic, ROSE_LOG_MESSAGE_SIZE, 8192, "roselog publisher");
 	n->log_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "param_query");
@@ -1357,6 +1358,7 @@ i64 rose_read(rose_subscriber *s, rosemsg *msg) {
 	int64_t ret = quicksand_read(s->sub, msg->data, &sz);
 	if(ret >= 0) {
 		msg->length = (u64) sz;
+		msg->cursor = 0;
 		return ret; /* number of msgs remaining */
 	}
 	if(ret < -1) {
@@ -1396,6 +1398,7 @@ i64 rose_readlast(rose_subscriber *s, rosemsg *msg) {
 	int64_t ret = quicksand_read_latest(s->sub, msg->data, &sz);
 	if(ret >= 0) {
 		msg->length = (u64) sz;
+		msg->cursor = 0;
 		return ret;
 	}
 	if(ret < -1) {
@@ -1452,15 +1455,19 @@ void rose_spin_once(rose_node *n) {
 		}
 
 		if(ret >= 0) {
+			m->cursor = 0;
 			sub->callback(m); // run callback
 		} else if(ret < -1) {
 			char code_buf[128];
+			char log_msg[1024];
 			rose_format_errno_code(ret, code_buf, sizeof(code_buf));
-			rose_warn("rose_spin_once failed reading callback data from topic \"%s\": quicksand returned %s, which means %s. Suggestion: %s",
-				  sub->sub ? (char *) sub->sub->name : "(unknown)",
-				  code_buf,
-				  rose_read_meaning(ret),
-				  rose_read_suggestion(ret));
+			(void) snprintf(log_msg, sizeof(log_msg),
+					"rose_spin_once failed reading callback data from topic \"%s\": quicksand returned %s, which means %s. Suggestion: %s",
+					sub->sub ? (char *) sub->sub->name : "(unknown)",
+					code_buf,
+					rose_read_meaning(ret),
+					rose_read_suggestion(ret));
+			(void) rose_log(n, ROSE_LOG_WARN, log_msg, -1);
 		}
 	}
 }
@@ -1480,130 +1487,139 @@ void rose_spin_forever(rose_node *node) {
 
 // -------------------------- Logging ------------------------------------------
 
-// --------------------------------------------------------------------
-//  rose_log - print to console and publish a Mirage "Log" message.
-//
-//  The function maps the integer level to a console prefix and an
-//  integer error value that is sent as an f64 argument in the Mirage
-//  message.
-//
-//  Console output:
-//      INFO   -> stdout
-//      others -> stderr
-// ------------------------------------------------------------------
-void rose_logv(rose_node *node, int level, const char *fmt, va_list ap) {
-	// ------------------------------------------------------------------
-	//  Map the integer level to a string prefix.
-	// --------------------------------------------------------------
-	const char *prefix;
-	switch(level) {
-	case 0: prefix = "[ROSE INFO] "; break;
-	case 1: prefix = "[ROSE WARN] "; break;
-	case 2: prefix = "[ROSE ERROR] "; break;
-	case 3: prefix = "[ROSE FATAL] "; break;
+static const char *rose_log_prefix(int *level) {
+	switch(*level) {
+	case ROSE_LOG_INFO: return "[ROSE INFO] ";
+	case ROSE_LOG_WARN: return "[ROSE WARN] ";
+	case ROSE_LOG_ERROR: return "[ROSE ERROR] ";
+	case ROSE_LOG_FATAL: return "[ROSE FATAL] ";
 	default:
-		prefix = "[ROSE ERROR] ";
-		level = 2; // treat unknown as ERROR
-		break;
+		*level = ROSE_LOG_ERROR;
+		return "[ROSE ERROR] ";
+	}
+}
+
+static i64 rose_log_write_msg(mirage_msg *m,
+			      int level,
+			      const char *node_name,
+			      i64 node_name_length,
+			      const char *message,
+			      i64 message_length) {
+	if(mirage_write_start(m) < 0
+	   || mirage_write_fn(m, "Log", (i64) strlen("Log"), 3) < 0
+	   || mirage_write_i64(m, (i64) level) < 0
+	   || mirage_write_string(m, node_name, node_name_length) < 0
+	   || mirage_write_string(m, message, message_length) < 0) {
+		return ROSE_ERR_BUFFERSIZE;
+	}
+	return ROSE_OK;
+}
+
+static i64 rose_log_truncate_to_fit(mirage_msg *m,
+				    int level,
+				    const char *node_name,
+				    i64 node_name_length,
+				    const char *message,
+				    i64 message_length) {
+	if(rose_log_write_msg(m, level, node_name, node_name_length,
+			      message, message_length) == ROSE_OK) {
+		return message_length;
 	}
 
-	// ------------------------------------------------------------------
-	//  Format the user message (max 1024 bytes).
-	// --------------------------------------------------------------
-	char user_msg[1024];
-	int user_len = vsnprintf(user_msg, sizeof(user_msg), fmt, ap);
-	if(user_len < 0) {
-		return; // formatting error
-	}
-	if((size_t) user_len >= sizeof(user_msg)) { // truncate if needed
-		user_len = (int) sizeof(user_msg) - 1;
-	}
-	user_msg[user_len] = '\0';
-
-	// ------------------------------------------------------------------
-	//  Compose the console string.
-	// ----------------------------------------------------------------
-	char console_msg[1024];
-	int console_len = snprintf(console_msg, sizeof(console_msg),
-				   "%s%s", prefix, user_msg);
-	if(console_len < 0) {
-		return;
-	}
-	if((size_t) console_len >= sizeof(console_msg)) {
-		console_len = (int) sizeof(console_msg) - 1;
-	}
-	console_msg[console_len] = '\0';
-
-	// ------------------------------------------------------------------
-	//  Print to stdout (INFO) or stderr (others).
-	// --------------------------------------------------------------
-	FILE *stream = (level == 0) ? stdout : stderr;
-	fputs(console_msg, stream);
-	fputc('\n', stream);
-	(void) fflush(stream);
-
-	// -----------------------------------------------------------------
-	// Build and publish a Mirage message.
-	// -------------------------------------------------------------
-	static _Thread_local mirage_msg *m = NULL;
-	if(!m) {
-		m = mirage_create(1024, 0);
-		if(!m) {
-			return;
+	i64 lo = 0;
+	i64 hi = message_length;
+	while(lo < hi) {
+		i64 mid = lo + (hi - lo + 1) / 2;
+		if(rose_log_write_msg(m, level, node_name, node_name_length,
+				      message, mid) == ROSE_OK) {
+			lo = mid;
+		} else {
+			hi = mid - 1;
 		}
 	}
 
-	int64_t err = 0;
-	err |= mirage_write_start(m); /* message start marker */
-	err |= mirage_write_fn(m, "Log", (int64_t) strlen("Log"), 3);
-	err |= mirage_write_i64(m, (i64) level);
-	err |= mirage_write_string(m, node->name, node->name_length);
-	err |= mirage_write_string(m, user_msg, // TODO (Alec, 2025): truncate?
-				   (int64_t) strlen(user_msg));
+	(void) rose_log_write_msg(m, level, node_name, node_name_length, message, lo);
+	return lo;
+}
 
-	if(err >= 0 && node && node->log_pub.pub) {
-		int64_t msg_len = m->cursor;
-		quicksand_write(node->log_pub.pub, m->data, msg_len);
-	} else {
-		fprintf(stderr, "Log message too big for roselog.\n");
+void rose_log(rose_node *node, int level, const char *message, i64 message_length) {
+	if(message_length == -1) {
+		if(!message) {
+			message = "";
+			message_length = 0;
+		} else {
+			message_length = (i64) strlen(message);
+		}
+	}
+	if(message_length < 0) {
+		message_length = 0;
+	}
+	if(!message) {
+		message = "";
+		message_length = 0;
+	}
+	i64 original_message_length = message_length;
+
+	const char *prefix = rose_log_prefix(&level);
+	i64 console_length = message_length;
+	if(console_length > ROSE_LOG_MESSAGE_SIZE) {
+		console_length = ROSE_LOG_MESSAGE_SIZE;
 	}
 
-	mirage_destroy(&m, 0);
+	mirage_msg *m = NULL;
+	if(node && node->log_pub.pub) {
+		m = mirage_create(ROSE_LOG_MESSAGE_SIZE, NULL);
+		if(m) {
+			const char *node_name = node->name ? node->name : "";
+			i64 node_name_length = node->name ? (i64) node->name_length : 0;
+			console_length = rose_log_truncate_to_fit(m, level,
+								  node_name,
+								  node_name_length,
+								  message,
+								  console_length);
+		}
+	}
+
+	FILE *stream = (level == ROSE_LOG_INFO) ? stdout : stderr;
+	fputs(prefix, stream);
+	if(console_length > 0) {
+		(void) fwrite(message, 1, (size_t) console_length, stream);
+	}
+	fputc('\n', stream);
+	(void) fflush(stream);
+	if(console_length < original_message_length) {
+		fprintf(stderr,
+			"[ROSE WARN] truncated log message from %lld to %lld bytes to fit the %d-byte roselog slot\n",
+			(long long) original_message_length,
+			(long long) console_length,
+			ROSE_LOG_MESSAGE_SIZE);
+		(void) fflush(stderr);
+	}
+
+	if(!m) {
+		return;
+	}
+
+	i64 payload_length = m->cursor;
+	(void) quicksand_write(node->log_pub.pub, m->data, payload_length);
+	mirage_destroy(&m, NULL);
+	(void) payload_length;
 }
 
-void rose_log(rose_node *node, int level, const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	rose_logv(node, level, fmt, ap);
-	va_end(ap);
+void rose_info(const char *message, i64 message_length) {
+	rose_log(ROSE_STATIC_NODE, ROSE_LOG_INFO, message, message_length);
 }
 
-void rose_info(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	rose_logv(ROSE_STATIC_NODE, 0, fmt, ap);
-	va_end(ap);
+void rose_warn(const char *message, i64 message_length) {
+	rose_log(ROSE_STATIC_NODE, ROSE_LOG_WARN, message, message_length);
 }
 
-void rose_warn(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	rose_logv(ROSE_STATIC_NODE, 1, fmt, ap);
-	va_end(ap);
+void rose_error(const char *message, i64 message_length) {
+	rose_log(ROSE_STATIC_NODE, ROSE_LOG_ERROR, message, message_length);
 }
 
-void rose_error(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	rose_logv(ROSE_STATIC_NODE, 2, fmt, ap);
-	va_end(ap);
-}
-
-void rose_fatal(const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	rose_logv(ROSE_STATIC_NODE, 3, fmt, ap);
-	va_end(ap);
+void rose_fatal(const char *message, i64 message_length) {
+	rose_log(ROSE_STATIC_NODE, ROSE_LOG_FATAL, message, message_length);
 }
 
 
