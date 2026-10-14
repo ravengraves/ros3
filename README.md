@@ -1,11 +1,11 @@
 # ROS3 🌹
 
-ros3 is a lightweight and high-performance pub/sub middleware for robotic systems.
+[ros3 ("rose" 🌹)](https://ros3.org) is a lightweight and high-performance pub/sub middleware for robotic systems.
 
-It is a ROS-like robotics runtime layer with lightning-fast system introspection tools and optional network and serial transports. ROS3 uses [quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding.
+It is a ROS-like robotics runtime layer with lightning-fast system introspection tools and optional network and serial transports. ros3 uses [quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding. Overall, ros3 achieves 100x higher throughput, 30x lower latency, and 350x faster builds than [ROS2](http://ros2.org)!
 
-**Build status:**
-* Ubuntu 24.04 LTS: [![ROS3 CI](https://github.com/ravengraves/ros3/actions/workflows/ci.yml/badge.svg)](https://github.com/ravengraves/ros3/actions/workflows/ci.yml)
+**Build Status:**
+[![ROS3 CI](https://github.com/ravengraves/ros3/actions/workflows/ci.yml/badge.svg)](https://github.com/ravengraves/ros3/actions/workflows/ci.yml)
 
 
 ## Performance
@@ -39,7 +39,7 @@ ros2 (manually trimmed build, no tests):
 This makes ROS3 builds about ~350x-450x faster than ROS2.
 
 **Installation Size**
-d
+
 ROS3:
 
 ```
