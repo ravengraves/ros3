@@ -173,6 +173,12 @@ static int add_topics_from_csv(char topics[][256], int *count, int max,
 		while(*p && *p != ',' && i < 255) {
 			buf[i++] = *p++;
 		}
+		if(*p && *p != ',') {
+			while(*p && *p != ',') {
+				p++;
+			}
+			continue;
+		}
 		buf[i] = '\0';
 
 		if(i == 0) {
@@ -189,7 +195,7 @@ static int add_topics_from_csv(char topics[][256], int *count, int max,
 		}
 
 		if(!found && *count < max) {
-			strcpy(topics[*count], buf);
+			memcpy(topics[*count], buf, (size_t) i + 1);
 			(*count)++;
 		}
 	}
