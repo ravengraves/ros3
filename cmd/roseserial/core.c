@@ -1,13 +1,16 @@
 // roseserial.c - Bidirectional serial bridge for microcontrollers
 //
 // Usage: roseserial <device> <rx_topic> <tx_topic> <baud> <msg_size> <slots>
-// Framing: [2-byte LE length][payload]
+// Framing: 0x7E [version=1][u16 LE length][payload][u32 LE CRC] 0x7E
+//          (see frame.h)
 
 #define _GNU_SOURCE
 
 #include "core.h"
 #include "ros3.h"
 
+#include "../common/liaison.h"
+#include "frame.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -18,14 +21,12 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define ROSESERIAL_IO_TIMEOUT_MS 1000
-
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
-	    || strcmp(arg, "--help") == 0
-	    || strcmp(arg, "/h") == 0
-	    || strcmp(arg, "/help") == 0
-	    || strcmp(arg, "/?") == 0;
+			|| strcmp(arg, "--help") == 0
+			|| strcmp(arg, "/h") == 0
+			|| strcmp(arg, "/help") == 0
+			|| strcmp(arg, "/?") == 0;
 }
 
 static void print_usage(const char *argv0) {
@@ -81,116 +82,27 @@ static int serial_open(const char *device, int baud) {
 	}
 
 	struct termios tty;
-	tcgetattr(fd, &tty);
+	if(tcgetattr(fd, &tty) != 0) {
+		goto fail;
+	}
 	cfmakeraw(&tty);
 	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8 | CLOCAL | CREAD;
 	tty.c_cflag &= ~(PARENB | CSTOPB | CRTSCTS);
 	tty.c_iflag &= ~(IXON | IXOFF | IXANY);
 	tty.c_cc[VMIN] = 0;
 	tty.c_cc[VTIME] = 0;
-	cfsetspeed(&tty, speed);
-	tcsetattr(fd, TCSANOW, &tty);
-	tcflush(fd, TCIOFLUSH);
+	if(cfsetspeed(&tty, speed) != 0 || tcsetattr(fd, TCSANOW, &tty) != 0
+	   || tcflush(fd, TCIOFLUSH) != 0) {
+		goto fail;
+	}
 
 	return fd;
+fail: {
+	int saved = errno;
+	close(fd);
+	errno = saved;
 }
-
-static ssize_t read_exact(int fd, uint8_t *buf, size_t len, int timeout_ms) {
-	size_t off = 0;
-	u64 start = rose_now();
-
-	while(off < len) {
-		ssize_t n = read(fd, buf + off, len - off);
-		if(n > 0) {
-			off += (size_t) n;
-			continue;
-		}
-		if(n == 0) {
-			return -1;
-		}
-		if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-			return -1;
-		}
-
-		f64 elapsed_ns = rose_nanoseconds(rose_now(), start);
-		int remaining_ms = timeout_ms - (int) (elapsed_ns / 1000000.0);
-		if(remaining_ms <= 0) {
-			return -1;
-		}
-
-		struct pollfd pfd = {.fd = fd, .events = POLLIN};
-		int pr = poll(&pfd, 1, remaining_ms);
-		if(pr > 0) {
-			if(pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				return -1;
-			}
-			continue;
-		}
-		if(pr == 0) {
-			return -1;
-		}
-		if(errno != EINTR) {
-			return -1;
-		}
-	}
-
-	return (ssize_t) off;
-}
-
-static ssize_t write_exact(int fd, const uint8_t *buf, size_t len, int timeout_ms) {
-	size_t off = 0;
-	u64 start = rose_now();
-
-	while(off < len) {
-		ssize_t n = write(fd, buf + off, len - off);
-		if(n > 0) {
-			off += (size_t) n;
-			continue;
-		}
-		if(n == 0) {
-			return -1;
-		}
-		if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-			return -1;
-		}
-
-		f64 elapsed_ns = rose_nanoseconds(rose_now(), start);
-		int remaining_ms = timeout_ms - (int) (elapsed_ns / 1000000.0);
-		if(remaining_ms <= 0) {
-			return -1;
-		}
-
-		struct pollfd pfd = {.fd = fd, .events = POLLOUT};
-		int pr = poll(&pfd, 1, remaining_ms);
-		if(pr > 0) {
-			if(pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				return -1;
-			}
-			continue;
-		}
-		if(pr == 0) {
-			return -1;
-		}
-		if(errno != EINTR) {
-			return -1;
-		}
-	}
-
-	return (ssize_t) off;
-}
-
-static int discard_exact(int fd, size_t len, int timeout_ms) {
-	uint8_t scratch[256];
-
-	while(len > 0) {
-		size_t chunk = len < sizeof(scratch) ? len : sizeof(scratch);
-		if(read_exact(fd, scratch, chunk, timeout_ms) != (ssize_t) chunk) {
-			return -1;
-		}
-		len -= chunk;
-	}
-
-	return 0;
+	return -1;
 }
 
 int roseserial_main(int argc, char **argv) {
@@ -217,87 +129,148 @@ int roseserial_main(int argc, char **argv) {
 		return 1;
 	}
 
-	int fd = serial_open(device, baud);
+	if(msg_size <= 0 || msg_size > UINT16_MAX || !liaison_sizes_valid(msg_size, slots)) {
+		fprintf(stderr, "roseserial: invalid size/slots (size 1..65535, ring budget 64MiB)\n");
+		return 1;
+	}
+	int status = 1, fd = -1;
+	rose_node *node = NULL;
+	mirage_msg *tx_msg = NULL;
+	uint8_t *wire = NULL;
+	struct serial_parser *parser = NULL;
+	fd = serial_open(device, baud);
 	if(fd < 0) {
-		fprintf(stderr, "Failed to open %s @ %d\n", device, baud);
-		return 1;
+		perror("roseserial: serial setup");
+		goto cleanup;
 	}
-
-	// Init as rose node
-	rose_node *node = rose_init(argc, argv, "roseserial", NULL, NULL);
-
-	// RX: serial -> topic (we publish)
-	rose_publisher *rx_pub = rose_create_pub(node, (char *) rx_topic, -1, msg_size, slots);
-	// TX: topic -> serial (we subscribe)
-	rose_subscriber *tx_sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
-	char log_msg[256];
-
-	if(!rx_pub) {
-		fprintf(stderr, "Failed to create topics\n");
-		if(close(fd) != 0) {}
-		return 1;
+	node = rose_init(argc, argv, "roseserial", NULL, NULL);
+	if(!node) {
+		goto cleanup;
 	}
-
-	(void) snprintf(log_msg, sizeof(log_msg), "%s @ %d | rx:%s tx:%s", device, baud, rx_topic, tx_topic);
-	(void) rose_info(log_msg, -1);
-	if(!tx_sub) {
-		(void) snprintf(log_msg, sizeof(log_msg), "TX topic %s not available yet; retrying every 1s", tx_topic);
-		(void) rose_info(log_msg, -1);
+	liaison_signals();
+	rose_publisher *pub = rose_create_pub(node, (char *) rx_topic, -1, msg_size, slots);
+	if(!pub) {
+		fprintf(stderr, "roseserial: publisher creation failed\n");
+		goto cleanup;
 	}
-
-	mirage_msg *msg = mirage_create(msg_size, NULL);
-	uint8_t hdr[2];
-	u64 last_tx_sub_attempt = rose_now();
-
-	while(rose_ok(node)) {
-		struct pollfd pfd = {.fd = fd, .events = POLLIN};
-		poll(&pfd, 1, 10);
-
-		if(!tx_sub && rose_elapsed_seconds(last_tx_sub_attempt) >= 1.0) {
-			tx_sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
-			last_tx_sub_attempt = rose_now();
-			if(tx_sub) {
-				(void) snprintf(log_msg, sizeof(log_msg), "Connected TX topic %s", tx_topic);
-				(void) rose_info(log_msg, -1);
+	rose_subscriber *sub = NULL;
+	wire = malloc(2 * ((size_t) msg_size + 7) + 2);
+	parser = calloc(1, sizeof(*parser));
+	if(!wire || !parser) {
+		fprintf(stderr, "roseserial: allocation failed\n");
+		goto cleanup;
+	}
+	size_t tx_len = 0, tx_off = 0;
+	u64 tx_start = 0, retry = 0, received = 0, sent = 0, dropped = 0;
+	status = 0;
+	while(liaison_running(node)) {
+		if(!sub && (!retry || rose_elapsed_seconds(retry) >= 1.0)) {
+			sub = rose_create_sub(node, (char *) tx_topic, -1, 0, NULL);
+			retry = rose_now();
+			if(sub && !(tx_msg = liaison_source_buffer(sub))) {
+				status = 1;
+				break;
 			}
 		}
-
-		// Serial -> RX topic
+		if(sub && tx_off == tx_len) {
+			i64 r = rose_read(sub, tx_msg);
+			if(r >= 0) {
+				if(tx_msg->length <= 0 || tx_msg->length > msg_size || tx_msg->length > UINT16_MAX) {
+					++dropped;
+					fprintf(stderr, "roseserial: dropped oversized source sample (%llu bytes)\n", (unsigned long long) tx_msg->length);
+				} else {
+					tx_len = serial_encode(wire, tx_msg->data, tx_msg->length);
+					tx_off = 0;
+					tx_start = rose_now();
+				}
+			} else if(r < -1) {
+				fprintf(stderr, "roseserial: source read failed (%lld)\n", (long long) r);
+				status = 1;
+				break;
+			}
+		}
+		if((parser->used || parser->escaped) && !parser->dropping && !liaison_remaining(parser->start)) {
+			parser->dropping = 1; /* Wait for an explicit delimiter before resuming. */
+		}
+		if(tx_off < tx_len && !liaison_remaining(tx_start)) {
+			fprintf(stderr, "roseserial: transmit frame timed out\n");
+			status = 1;
+			break;
+		}
+		struct pollfd pfd = {.fd = fd, .events = POLLIN | (tx_off < tx_len ? POLLOUT : 0)};
+		int pr = poll(&pfd, 1, tx_off < tx_len ? 0 : 1);
+		if(pr < 0) {
+			if(errno == EINTR) {
+				continue;
+			}
+			perror("roseserial: poll");
+			status = 1;
+			break;
+		}
+		if(pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			fprintf(stderr, "roseserial: device disconnected\n");
+			status = 1;
+			break;
+		}
 		if(pfd.revents & POLLIN) {
-			if(read_exact(fd, hdr, sizeof(hdr), ROSESERIAL_IO_TIMEOUT_MS)
-			   == (ssize_t) sizeof(hdr)) {
-				uint16_t len = hdr[0] | (hdr[1] << 8);
-				if(len <= msg_size) {
-					ssize_t n = read_exact(fd, msg->data, len,
-							     ROSESERIAL_IO_TIMEOUT_MS);
-					if(n == (ssize_t) len) {
-						msg->length = len;
-						msg->cursor = len;
-						rose_publish(rx_pub, msg);
+			uint8_t chunk[4096];
+			ssize_t n = read(fd, chunk, sizeof(chunk));
+			if(n < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+				perror("roseserial: read");
+				status = 1;
+				break;
+			}
+			/* VMIN=0 permits a zero-byte read: preserve parser state. */
+			for(ssize_t i = 0; i < n; ++i) {
+				int r = serial_feed(parser, chunk[i], msg_size);
+				if(r < 0) {
+					++dropped;
+					continue;
+				}
+				if(r == 1) {
+					size_t len = parser->raw[1] | ((size_t) parser->raw[2] << 8);
+					mirage_msg msg = {.data = parser->raw + 3, .max_length = len, .length = len, .cursor = len};
+					if(rose_publish(pub, &msg) < 0) {
+						fprintf(stderr, "roseserial: publish failed\n");
+						status = 1;
+						break;
 					}
-				} else if(discard_exact(fd, len, ROSESERIAL_IO_TIMEOUT_MS) != 0) {
-					break;
+					++received;
 				}
 			}
-		}
-
-		// TX topic -> Serial
-		msg->length = msg->max_length;
-		if(tx_sub && rose_read(tx_sub, msg) >= 0) {
-			hdr[0] = msg->length & 0xFF;
-			hdr[1] = (msg->length >> 8) & 0xFF;
-			if(write_exact(fd, hdr, sizeof(hdr), ROSESERIAL_IO_TIMEOUT_MS)
-			   != (ssize_t) sizeof(hdr)) {
+			if(status) {
 				break;
 			}
-			if(write_exact(fd, msg->data, msg->length,
-				       ROSESERIAL_IO_TIMEOUT_MS)
-			   != (ssize_t) msg->length) {
+		}
+		if((pfd.revents & POLLOUT) && tx_off < tx_len) {
+			ssize_t n = write(fd, wire + tx_off, tx_len - tx_off);
+			if(n > 0) {
+				tx_off += (size_t) n;
+				if(tx_off == tx_len) {
+					++sent;
+				}
+			} else if(n < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+				perror("roseserial: write");
+				status = 1;
 				break;
 			}
 		}
 	}
-
-	if(close(fd) != 0) {}
-	return 0;
+	fprintf(stderr, "roseserial: received=%llu sent=%llu dropped=%llu\n", (unsigned long long) received, (unsigned long long) sent, (unsigned long long) dropped);
+cleanup:
+	if(liaison_stop) {
+		status = 0;
+	}
+	free(parser);
+	free(wire);
+	if(tx_msg) {
+		mirage_destroy(&tx_msg, NULL);
+	}
+	if(node) {
+		rose_shutdown(node);
+	}
+	if(fd >= 0) {
+		close(fd);
+	}
+	return status;
 }
