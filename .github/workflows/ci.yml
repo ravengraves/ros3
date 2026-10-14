@@ -1,0 +1,68 @@
+name: ROS3 CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: ros3
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: ros3
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install build and analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang clang-tidy llvm lld
+
+      - name: Build and install dependencies
+        run: |
+          git clone --depth 1 https://git.sr.ht/~alecgraves/mirage ../mirage
+          git clone --depth 1 https://git.sr.ht/~alecgraves/quicksand ../quicksand
+          make -C ../mirage -j2 all
+          sudo make -C ../mirage install-lib
+          make -C ../quicksand -j2 all
+          sudo make -C ../quicksand install-lib
+          sudo ldconfig
+
+      - name: Build
+        run: make -j2 all
+
+      - name: Test C and C++ transport
+        run: make check-runtime check-cpp
+
+      - name: Run analysis and sanitizer checks
+        run: make check
+
+      - name: Install Python bindings
+        run: python -m pip install ../mirage/lang/python ./lang/python
+
+      - name: Test Python bindings
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/ros3/build:/usr/local/lib
+          ROSE_BASE: ci_python
+        run: |
+          ./build/rosecore > build/python-core.log 2>&1 &
+          core_pid=$!
+          trap 'kill "$core_pid" 2>/dev/null || true; wait "$core_pid" 2>/dev/null || true' EXIT
+          sleep 1
+          kill -0 "$core_pid" || { cat build/python-core.log; exit 1; }
+          make check-python
