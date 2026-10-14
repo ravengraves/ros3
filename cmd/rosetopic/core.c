@@ -11,6 +11,8 @@
 
 #include "core.h"
 #include "ros3.h"
+#include "../common/process.h"
+#include "../common/query.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -75,23 +77,11 @@ static int get_query_poll_step_ms(int timeout_ms) {
 }
 
 static void build_shm_base_prefix(char *out, size_t out_size) {
-	const char *rose_base = getenv("ROSE_BASE");
-	const char *base = rose_base ? rose_base : "rose";
-	size_t base_len = strlen(base);
-
-	while(base_len > 0 && base[0] == '/') {
-		base += 1;
-		base_len -= 1;
+	if(!rose_topic_to_shm(out, out_size, "x")) {
+		out[0] = '\0';
+		return;
 	}
-	while(base_len > 0 && base[base_len - 1] == '/') {
-		base_len -= 1;
-	}
-	if(base_len == 0) {
-		base = "rose";
-		base_len = 4;
-	}
-
-	snprintf(out, out_size, "/%.*s%%", (int) base_len, base);
+	out[strlen(out) - 1] = '\0';
 }
 
 // Convert shm topic name to display format, stripping the ROSE_BASE prefix.
@@ -159,72 +149,6 @@ static void skip_to_latest(quicksand_connection *conn) {
 
 	quicksand_read_latest(conn, buf, &buf_size);
 	free(buf);
-}
-
-// Send a DumpAll request
-static void send_dump_request(quicksand_connection *conn) {
-	mirage_msg *msg = mirage_create(256, NULL);
-	if(!msg) {
-		return;
-	}
-
-	mirage_write_start(msg);
-	mirage_write_fn(msg, ROSE_MSG_DUMP_ALL, (i64) strlen(ROSE_MSG_DUMP_ALL), 0);
-	quicksand_write(conn, msg->data, msg->cursor);
-
-	mirage_destroy(&msg, NULL);
-}
-
-// Parse a NodeInfo message
-static int parse_node_info(mirage_msg *msg, char *name, size_t name_size,
-			   i64 *pid, i64 *last_heartbeat,
-			   char *pubs, size_t pubs_size,
-			   char *subs, size_t subs_size) {
-	static char fn_name[64];
-	i64 fn_len, fn_argc;
-	i64 str_len;
-
-	msg->cursor = 0;
-	if(mirage_read_start(msg) < 0) {
-		return -1;
-	}
-	if(mirage_read_fn(msg, fn_name, &fn_len, sizeof(fn_name) - 1, &fn_argc) < 0) {
-		return -1;
-	}
-	fn_name[fn_len] = '\0';
-
-	if(strcmp(fn_name, ROSE_MSG_DONE) == 0) {
-		return 0;
-	}
-
-	if(strcmp(fn_name, ROSE_MSG_NODE_INFO) != 0) {
-		return -1;
-	}
-
-	if(mirage_read_string(msg, name, &str_len, (i64) name_size - 1) < 0) {
-		return -1;
-	}
-	name[str_len] = '\0';
-
-	if(mirage_read_i64(msg, pid) < 0) {
-		return -1;
-	}
-
-	if(mirage_read_i64(msg, last_heartbeat) < 0) {
-		return -1;
-	}
-
-	if(mirage_read_string(msg, pubs, &str_len, (i64) pubs_size - 1) < 0) {
-		return -1;
-	}
-	pubs[str_len] = '\0';
-
-	if(mirage_read_string(msg, subs, &str_len, (i64) subs_size - 1) < 0) {
-		return -1;
-	}
-	subs[str_len] = '\0';
-
-	return 1;
 }
 
 // Add topics from CSV to a list (avoiding duplicates)
@@ -303,16 +227,16 @@ static int csv_contains_topic(const char *csv, const char *topic) {
 }
 
 // Read responses and collect all unique topics
-static void read_and_print_topics(quicksand_connection *conn) {
+static int read_and_print_topics(quicksand_connection *conn, rose_query *query) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
-		return;
+		return 1;
 	}
 
 	static char name[256];
-	static char pubs[16384];
-	static char subs[16384];
+	static char pubs[ROSE_TOPIC_CSV_SIZE];
+	static char subs[ROSE_TOPIC_CSV_SIZE];
 	i64 pid, last_heartbeat;
 
 	// Collect unique topics
@@ -321,14 +245,14 @@ static void read_and_print_topics(quicksand_connection *conn) {
 
 	int timeout_ms = get_query_timeout_ms();
 	int poll_ms = get_query_poll_step_ms(timeout_ms);
-	int waited = 0;
+	u64 wait_start = rose_query_clock();
 
-	while(waited < timeout_ms) {
+	while(rose_query_clock() - wait_start < (u64) timeout_ms * 1000000ULL) {
 		i64 sz = msg->max_length;
 		i64 r = quicksand_read(conn, msg->data, &sz);
 		if(r >= 0) {
 			msg->length = sz;
-			int res = parse_node_info(msg, name, sizeof(name),
+			int res = rose_query_parse(query, msg, name, sizeof(name),
 						  &pid, &last_heartbeat,
 						  pubs, sizeof(pubs),
 						  subs, sizeof(subs));
@@ -338,11 +262,15 @@ static void read_and_print_topics(quicksand_connection *conn) {
 				add_topics_from_csv(topics, &topic_count, 1024, pubs);
 				add_topics_from_csv(topics, &topic_count, 1024, subs);
 			}
-			waited = 0;
 		} else {
 			quicksand_sleep((u64) poll_ms * 1000000ULL);
-			waited += poll_ms;
 		}
+	}
+
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+		mirage_destroy(&msg, NULL);
+		return 1;
 	}
 
 	// Sort and print with display formatting
@@ -354,20 +282,22 @@ static void read_and_print_topics(quicksand_connection *conn) {
 	}
 
 	mirage_destroy(&msg, NULL);
+	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	return query->complete ? 0 : 1;
 }
 
 // Read responses and print info for a specific topic
-static void read_and_print_topic_info(quicksand_connection *conn,
+static int read_and_print_topic_info(quicksand_connection *conn, rose_query *query,
 				      const char *topic_filter) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
-		return;
+		return 1;
 	}
 
 	static char name[256];
-	static char pubs[16384];
-	static char subs[16384];
+	static char pubs[ROSE_TOPIC_CSV_SIZE];
+	static char subs[ROSE_TOPIC_CSV_SIZE];
 	i64 pid, last_heartbeat;
 
 	// Collect publishers and subscribers
@@ -377,14 +307,14 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 
 	int timeout_ms = get_query_timeout_ms();
 	int poll_ms = get_query_poll_step_ms(timeout_ms);
-	int waited = 0;
+	u64 wait_start = rose_query_clock();
 
-	while(waited < timeout_ms) {
+	while(rose_query_clock() - wait_start < (u64) timeout_ms * 1000000ULL) {
 		i64 sz = msg->max_length;
 		i64 r = quicksand_read(conn, msg->data, &sz);
 		if(r >= 0) {
 			msg->length = sz;
-			int res = parse_node_info(msg, name, sizeof(name),
+			int res = rose_query_parse(query, msg, name, sizeof(name),
 						  &pid, &last_heartbeat,
 						  pubs, sizeof(pubs),
 						  subs, sizeof(subs));
@@ -408,11 +338,15 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 					}
 				}
 			}
-			waited = 0;
 		} else {
 			quicksand_sleep((u64) poll_ms * 1000000ULL);
-			waited += poll_ms;
 		}
+	}
+
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+		mirage_destroy(&msg, NULL);
+		return 1;
 	}
 
 	char display[256];
@@ -437,6 +371,8 @@ static void read_and_print_topic_info(quicksand_connection *conn,
 	}
 
 	mirage_destroy(&msg, NULL);
+	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	return query->complete ? 0 : 1;
 }
 
 // Print data dump: ASCII, decimal, hex (80 chars wide, 8 bytes per line)
@@ -489,7 +425,10 @@ static void hex_dump(const uint8_t *data, size_t len) {
 static int echo_topic(const char *topic_name) {
 	// Convert topic name to shared memory format with ROSE_BASE
 	char shm_name[512];
-	rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name);
+	if(!rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name)) {
+		fprintf(stderr, "%s\n", rose_last_error());
+		return 1;
+	}
 
 	quicksand_connection *sub = NULL;
 	int64_t ret = quicksand_connect(&sub, shm_name, -1, 0, 0, NULL);
@@ -660,7 +599,10 @@ static void hz_sample_ring(quicksand_connection *conn,
 
 static int hz_topic(const char *topic_name) {
 	char shm_name[512];
-	rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name);
+	if(!rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name)) {
+		fprintf(stderr, "%s\n", rose_last_error());
+		return 1;
+	}
 
 	quicksand_connection *sub = NULL;
 	int64_t ret = quicksand_connect(&sub, shm_name, -1, 0, 0, NULL);
@@ -722,7 +664,10 @@ static int hz_topic(const char *topic_name) {
 
 static int remove_topic(const char *topic_name) {
 	char shm_name[512];
-	rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name);
+	if(!rose_topic_to_shm(shm_name, sizeof(shm_name), topic_name)) {
+		fprintf(stderr, "%s\n", rose_last_error());
+		return 1;
+	}
 	quicksand_delete(shm_name, -1);
 
 	printf("Unlinked %s\n", topic_name);
@@ -731,6 +676,7 @@ static int remove_topic(const char *topic_name) {
 
 int rosetopic_main(int argc, char **argv) {
 	int exit_code = 0;
+	rose_query query = {0};
 	quicksand_connection *conn = NULL;
 
 	if(argc < 2) {
@@ -743,6 +689,11 @@ int rosetopic_main(int argc, char **argv) {
 	}
 
 	(void) rose_set_pdeathsig(SIGTERM);
+	char namespace_probe[256];
+	if(!rose_topic_to_shm(namespace_probe, sizeof(namespace_probe), "rosecore_dump")) {
+		fprintf(stderr, "%s\n", rose_last_error());
+		return 1;
+	}
 
 	const char *cmd = argv[1][0] == '/' ? argv[1] + 1 : argv[1];
 
@@ -760,8 +711,12 @@ int rosetopic_main(int argc, char **argv) {
 		}
 
 		skip_to_latest(conn);
-		send_dump_request(conn);
-		read_and_print_topics(conn);
+		if(rose_query_send(&query, ROSE_MSG_DUMP_ALL, NULL, 0) < 0) {
+			fprintf(stderr, "Failed to send dump request\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		exit_code = read_and_print_topics(conn, &query);
 
 	} else if(strcmp(cmd, "info") == 0) {
 		if(argc < 3) {
@@ -790,8 +745,12 @@ int rosetopic_main(int argc, char **argv) {
 		}
 
 		skip_to_latest(conn);
-		send_dump_request(conn);
-		read_and_print_topic_info(conn, topic_filter);
+		if(rose_query_send(&query, ROSE_MSG_DUMP_ALL, NULL, 0) < 0) {
+			fprintf(stderr, "Failed to send dump request\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		exit_code = read_and_print_topic_info(conn, &query, topic_filter);
 
 	} else if(strcmp(cmd, "echo") == 0) {
 		if(argc < 3) {

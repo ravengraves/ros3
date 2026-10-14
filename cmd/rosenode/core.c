@@ -11,6 +11,8 @@
 
 #include "core.h"
 #include "ros3.h"
+#include "../common/process.h"
+#include "../common/query.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -97,141 +99,39 @@ static void build_topic_name(char *buf, size_t buf_size, const char *suffix) {
 	rose_topic_to_shm(buf, buf_size, topic);
 }
 
-// Send a DumpAll request
-static void send_dump_request(quicksand_connection *conn) {
-	mirage_msg *msg = mirage_create(256, NULL);
-	if(!msg) {
-		return;
-	}
-
-	mirage_write_start(msg);
-	mirage_write_fn(msg, ROSE_MSG_DUMP_ALL, (i64) strlen(ROSE_MSG_DUMP_ALL), 0);
-	quicksand_write(conn, msg->data, msg->cursor);
-
-	mirage_destroy(&msg, NULL);
-}
-
-// Send a LookupName request
-static void send_lookup_name_request(quicksand_connection *conn,
-				     const char *prefix) {
-	mirage_msg *msg = mirage_create(512, NULL);
-	if(!msg) {
-		return;
-	}
-
-	mirage_write_start(msg);
-	mirage_write_fn(msg, ROSE_MSG_LOOKUP_NAME,
-			(i64) strlen(ROSE_MSG_LOOKUP_NAME), 1);
-	mirage_write_string(msg, (char *) prefix, (i64) strlen(prefix));
-	quicksand_write(conn, msg->data, msg->cursor);
-
-	mirage_destroy(&msg, NULL);
-}
-
-// Send a LookupPid request
-static void send_lookup_pid_request(quicksand_connection *conn, i64 pid) {
-	mirage_msg *msg = mirage_create(256, NULL);
-	if(!msg) {
-		return;
-	}
-
-	mirage_write_start(msg);
-	mirage_write_fn(msg, ROSE_MSG_LOOKUP_PID,
-			(i64) strlen(ROSE_MSG_LOOKUP_PID), 1);
-	mirage_write_i64(msg, pid);
-	quicksand_write(conn, msg->data, msg->cursor);
-
-	mirage_destroy(&msg, NULL);
-}
-
-// Parse and print a NodeInfo message, returns 1 if NodeInfo, 0 if Done, -1 error
-static int parse_node_info(mirage_msg *msg, char *name, size_t name_size,
-			   i64 *pid, i64 *last_heartbeat,
-			   char *pubs, size_t pubs_size,
-			   char *subs, size_t subs_size) {
-	static char fn_name[64];
-	i64 fn_len, fn_argc;
-	i64 str_len;
-
-	msg->cursor = 0;
-	if(mirage_read_start(msg) < 0) {
-		return -1;
-	}
-	if(mirage_read_fn(msg, fn_name, &fn_len, sizeof(fn_name) - 1, &fn_argc) < 0) {
-		return -1;
-	}
-	fn_name[fn_len] = '\0';
-
-	if(strcmp(fn_name, ROSE_MSG_DONE) == 0) {
-		return 0;
-	}
-
-	if(strcmp(fn_name, ROSE_MSG_NODE_INFO) != 0) {
-		return -1;
-	}
-
-	// Read name
-	if(mirage_read_string(msg, name, &str_len, (i64) name_size - 1) < 0) {
-		return -1;
-	}
-	name[str_len] = '\0';
-
-	// Read pid
-	if(mirage_read_i64(msg, pid) < 0) {
-		return -1;
-	}
-
-	// Read last_heartbeat
-	if(mirage_read_i64(msg, last_heartbeat) < 0) {
-		return -1;
-	}
-
-	// Read pubs
-	if(mirage_read_string(msg, pubs, &str_len, (i64) pubs_size - 1) < 0) {
-		return -1;
-	}
-	pubs[str_len] = '\0';
-
-	// Read subs
-	if(mirage_read_string(msg, subs, &str_len, (i64) subs_size - 1) < 0) {
-		return -1;
-	}
-	subs[str_len] = '\0';
-
-	return 1;
-}
-
 // Skip to latest position in ring buffer before sending request
-static void skip_to_latest(quicksand_connection *conn) {
-	uint8_t buf[4096];
+static int skip_to_latest(quicksand_connection *conn) {
+	static uint8_t buf[ROSE_QUERY_MSG_SIZE];
 	i64 sz = sizeof(buf);
-	quicksand_read_latest(conn, buf, &sz);
+	i64 ret = quicksand_read_latest(conn, buf, &sz);
+	// -1 is Quicksand's empty-ring result.
+	return ret >= 0 || ret == -1 ? 0 : -1;
 }
 
 // Read responses and print node list
-static void read_and_print_list(quicksand_connection *conn) {
+static int read_and_print_list(quicksand_connection *conn, rose_query *query) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
-		return;
+		return 1;
 	}
 
-	static char name[256];
-	static char pubs[16384];
-	static char subs[16384];
+	static char name[ROSE_MAX_NAME_LEN];
+	static char pubs[ROSE_TOPIC_CSV_SIZE];
+	static char subs[ROSE_TOPIC_CSV_SIZE];
 	i64 pid, last_heartbeat;
 
 	// Wait for responses (with timeout)
 	int timeout_ms = get_query_timeout_ms();
 	int poll_ms = get_query_poll_step_ms(timeout_ms);
-	int waited = 0;
+	u64 wait_start = rose_query_clock();
 
-	while(waited < timeout_ms) {
+	while(rose_query_clock() - wait_start < (u64) timeout_ms * 1000000ULL) {
 		i64 sz = msg->max_length;
 		i64 r = quicksand_read(conn, msg->data, &sz);
 		if(r >= 0) {
 			msg->length = sz;
-			int res = parse_node_info(msg, name, sizeof(name),
+			int res = rose_query_parse(query, msg, name, sizeof(name),
 						  &pid, &last_heartbeat,
 						  pubs, sizeof(pubs),
 						  subs, sizeof(subs));
@@ -241,46 +141,47 @@ static void read_and_print_list(quicksand_connection *conn) {
 			} else if(res == 1) {
 				printf("%s\n", name);
 			}
-			waited = 0; // Reset timeout on successful read
 		} else {
 			quicksand_sleep((u64) poll_ms * 1000000ULL);
-			waited += poll_ms;
 		}
 	}
 
 	mirage_destroy(&msg, NULL);
+	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	return query->complete ? 0 : 1;
 }
 
 // Read responses and print detailed node info
-static void read_and_print_info(quicksand_connection *conn) {
+static int read_and_print_info(quicksand_connection *conn, rose_query *query, const char *prefix, i64 expected_pid) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
-		return;
+		return 1;
 	}
 
-	static char name[256];
-	static char pubs[16384];
-	static char subs[16384];
+	static char name[ROSE_MAX_NAME_LEN];
+	static char pubs[ROSE_TOPIC_CSV_SIZE];
+	static char subs[ROSE_TOPIC_CSV_SIZE];
 	i64 pid, last_heartbeat;
 
 	int timeout_ms = get_query_timeout_ms();
 	int poll_ms = get_query_poll_step_ms(timeout_ms);
-	int waited = 0;
+	u64 wait_start = rose_query_clock();
 	int found = 0;
 
-	while(waited < timeout_ms) {
+	while(rose_query_clock() - wait_start < (u64) timeout_ms * 1000000ULL) {
 		i64 sz = msg->max_length;
 		i64 r = quicksand_read(conn, msg->data, &sz);
 		if(r >= 0) {
 			msg->length = sz;
-			int res = parse_node_info(msg, name, sizeof(name),
+			int res = rose_query_parse(query, msg, name, sizeof(name),
 						  &pid, &last_heartbeat,
 						  pubs, sizeof(pubs),
 						  subs, sizeof(subs));
 			if(res == 0) {
 				break;
-			} else if(res == 1) {
+			} else if(res == 1 && (prefix ? strncmp(name, prefix, strlen(prefix)) == 0
+						 : pid == expected_pid)) {
 				found++;
 				printf("Node: %s\n", name);
 				printf("  PID: %ld\n", (long) pid);
@@ -293,53 +194,54 @@ static void read_and_print_info(quicksand_connection *conn) {
 				printf("  Subscribers: %s\n", subs[0] ? subs : "(none)");
 				printf("\n");
 			}
-			waited = 0;
 		} else {
 			quicksand_sleep((u64) poll_ms * 1000000ULL);
-			waited += poll_ms;
 		}
 	}
 
-	if(found == 0) {
+	if(query->complete && found == 0) {
 		printf("No matching nodes found\n");
 	}
 
 	mirage_destroy(&msg, NULL);
+	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	return query->complete ? 0 : 1;
 }
 
 // Read responses and kill matching nodes
-static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
+static int read_and_kill(quicksand_connection *conn, rose_query *query, int use_sigkill, const char *prefix) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
-		return;
+		return 1;
 	}
 
-	static char name[256];
-	static char pubs[16384];
-	static char subs[16384];
+	static char name[ROSE_MAX_NAME_LEN];
+	static char pubs[ROSE_TOPIC_CSV_SIZE];
+	static char subs[ROSE_TOPIC_CSV_SIZE];
 	i64 pid, last_heartbeat;
 
 	int timeout_ms = get_query_timeout_ms();
 	int poll_ms = get_query_poll_step_ms(timeout_ms);
-	int waited = 0;
+	u64 wait_start = rose_query_clock();
 	int killed = 0;
 
 	int sig = use_sigkill ? SIGKILL : SIGINT;
 	const char *sig_name = use_sigkill ? "SIGKILL" : "SIGINT";
 
-	while(waited < timeout_ms) {
+	while(rose_query_clock() - wait_start < (u64) timeout_ms * 1000000ULL) {
 		i64 sz = msg->max_length;
 		i64 r = quicksand_read(conn, msg->data, &sz);
 		if(r >= 0) {
 			msg->length = sz;
-			int res = parse_node_info(msg, name, sizeof(name),
+			int res = rose_query_parse(query, msg, name, sizeof(name),
 						  &pid, &last_heartbeat,
 						  pubs, sizeof(pubs),
 						  subs, sizeof(subs));
 			if(res == 0) {
 				break;
-			} else if(res == 1) {
+			} else if(res == 1 && rose_valid_pid(pid)
+				  && strncmp(name, prefix, strlen(prefix)) == 0) {
 				if(kill((pid_t) pid, sig) == 0) {
 					printf("Sent %s to %s (pid %ld)\n",
 					       sig_name, name, (long) pid);
@@ -349,22 +251,23 @@ static void read_and_kill(quicksand_connection *conn, int use_sigkill) {
 						sig_name, name, (long) pid);
 				}
 			}
-			waited = 0;
 		} else {
 			quicksand_sleep((u64) poll_ms * 1000000ULL);
-			waited += poll_ms;
 		}
 	}
 
-	if(killed == 0) {
+	if(query->complete && killed == 0) {
 		printf("No matching nodes found\n");
 	}
 
 	mirage_destroy(&msg, NULL);
+	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	return query->complete ? 0 : 1;
 }
 
 int rosenode_main(int argc, char **argv) {
 	int exit_code = 0;
+	rose_query query = {0};
 	quicksand_connection *conn = NULL;
 	int64_t ret;
 	char topic[512];
@@ -379,6 +282,10 @@ int rosenode_main(int argc, char **argv) {
 	}
 
 	(void) rose_set_pdeathsig(SIGTERM);
+	if(!rose_topic_to_shm(topic, sizeof(topic), "rosecore_lookup")) {
+		fprintf(stderr, "%s\n", rose_last_error());
+		return 1;
+	}
 
 	const char *cmd = argv[1][0] == '/' ? argv[1] + 1 : argv[1];
 
@@ -392,9 +299,17 @@ int rosenode_main(int argc, char **argv) {
 			goto cleanup;
 		}
 
-		skip_to_latest(conn);
-		send_dump_request(conn);
-		read_and_print_list(conn);
+		if(skip_to_latest(conn) < 0) {
+			fprintf(stderr, "Failed to synchronize query channel\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		if(rose_query_send(&query, ROSE_MSG_DUMP_ALL, NULL, 0) < 0) {
+			fprintf(stderr, "Failed to send dump request\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		exit_code = read_and_print_list(conn, &query);
 
 	} else if(strcmp(cmd, "info") == 0) {
 		if(argc < 3) {
@@ -412,7 +327,13 @@ int rosenode_main(int argc, char **argv) {
 			goto cleanup;
 		}
 
-		skip_to_latest(conn);
+		if(skip_to_latest(conn) < 0) {
+			fprintf(stderr, "Failed to synchronize query channel\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		i64 expected_pid = 0;
+		const char *prefix = NULL;
 		if(is_pid_flag(argv[2])) {
 			if(argc < 4) {
 				print_usage();
@@ -420,17 +341,27 @@ int rosenode_main(int argc, char **argv) {
 				goto cleanup;
 			}
 			i64 pid = 0;
-			if(parse_i64_arg(argv[3], &pid) != 0) {
+			if(parse_i64_arg(argv[3], &pid) != 0 || !rose_valid_pid(pid)) {
 				fprintf(stderr, "Invalid pid: %s\n", argv[3]);
 				exit_code = 1;
 				goto cleanup;
 			}
-			send_lookup_pid_request(conn, pid);
+			expected_pid = pid;
+			if(rose_query_send(&query, ROSE_MSG_LOOKUP_PID, NULL, pid) < 0) {
+				fprintf(stderr, "Failed to send lookup request\n");
+				exit_code = 1;
+				goto cleanup;
+			}
 		} else {
-			send_lookup_name_request(conn, argv[2]);
+			prefix = argv[2];
+			if(rose_query_send(&query, ROSE_MSG_LOOKUP_NAME, prefix, 0) < 0) {
+				fprintf(stderr, "Failed to send lookup request\n");
+				exit_code = 1;
+				goto cleanup;
+			}
 		}
 
-		read_and_print_info(conn);
+		exit_code = read_and_print_info(conn, &query, prefix, expected_pid);
 
 	} else if(strcmp(cmd, "kill") == 0) {
 		if(argc < 3) {
@@ -463,9 +394,17 @@ int rosenode_main(int argc, char **argv) {
 			goto cleanup;
 		}
 
-		skip_to_latest(conn);
-		send_lookup_name_request(conn, name_arg);
-		read_and_kill(conn, use_sigkill);
+		if(skip_to_latest(conn) < 0) {
+			fprintf(stderr, "Failed to synchronize query channel\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		if(rose_query_send(&query, ROSE_MSG_LOOKUP_NAME, name_arg, 0) < 0) {
+			fprintf(stderr, "Failed to send lookup request\n");
+			exit_code = 1;
+			goto cleanup;
+		}
+		exit_code = read_and_kill(conn, &query, use_sigkill, name_arg);
 
 	} else {
 		print_usage();
