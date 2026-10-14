@@ -274,7 +274,7 @@ install-bin: $(BIN_TARGETS)
 	install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/ros3.bash
 	for cmd in $(COMPLETION_COMMANDS); do install -m 0644 $(COMPLETION_BASH) $(COMPLETION_INSTALL_DIR)/$$cmd; done
 
-install-lib: $(LIB_TARGETS) $(PC_FILE)
+install-lib: $(LIB_TARGETS) $(PC_FILE) install-embedded
 	mkdir -p $(LIB_INSTALL_DIR) $(INCLUDE_INSTALL_DIR) $(PKGCONFIG_INSTALL_DIR)
 	install -m 0644 $(BUILD_DIR)/libros3.so $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a $(LIB_INSTALL_DIR)/
 	install -m 0644 $(HEADER) $(INCLUDE_INSTALL_DIR)/ros3.h
@@ -297,7 +297,7 @@ uninstall-docs:
 
 uninstall-lib:
 	rm -f $(LIB_INSTALL_DIR)/libros3.so $(LIB_INSTALL_DIR)/libros3.a $(LIB_INSTALL_DIR)/libros3_gcc_lto.a
-	rm -f $(INCLUDE_INSTALL_DIR)/ros3.h
+	rm -f $(INCLUDE_INSTALL_DIR)/ros3.h $(INCLUDE_INSTALL_DIR)/ros3_embedded.h
 	rm -f $(PKGCONFIG_INSTALL_DIR)/ros3.pc
 
 uninstall: uninstall-lib uninstall-bin uninstall-docs
@@ -322,3 +322,92 @@ check-cpp: $(BUILD_DIR)/rosecore $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/te
 	install-bin install-docs install-lib install \
 	uninstall-bin uninstall-docs uninstall-lib uninstall \
 	format python check-python check-cpp
+
+# Focused regression coverage for control PID handling and registry bounds.
+$(BUILD_DIR)/test_control_node: test/test_control_node.c cmd/rosenode/core.c cmd/common/process.h $(HEADER) $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+
+$(BUILD_DIR)/test_control_core: test/test_control_core.c cmd/rosecore/core.c cmd/common/process.h $(HEADER) $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+
+$(BIN_TARGETS): $(HEADER)
+$(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic: cmd/common/process.h
+
+.PHONY: check-control
+check-control: $(BUILD_DIR)/test_control_node $(BUILD_DIR)/test_control_core
+	$(BUILD_DIR)/test_control_node
+	$(BUILD_DIR)/test_control_core
+
+$(BUILD_DIR)/test_subscriber_start: test/test_subscriber_start.c $(SOURCE) $(HEADER)
+	mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(DEP_STATIC_LIBS)
+
+.PHONY: check-subscriber-start
+check-subscriber-start: $(BUILD_DIR)/test_subscriber_start
+	$(BUILD_DIR)/test_subscriber_start
+
+$(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic $(BUILD_DIR)/test_control_node $(BUILD_DIR)/test_control_core: cmd/common/query.h
+
+.PHONY: check-query-cli
+check-query-cli: $(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic $(BUILD_DIR)/test_net_pub
+	BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_query_cli.py
+
+$(BUILD_DIR)/test_topic_routing: test/test_topic_routing.c $(SOURCE) $(HEADER)
+	mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(DEP_STATIC_LIBS)
+
+.PHONY: check-topic-routing
+check-topic-routing: $(BUILD_DIR)/test_topic_routing
+	$(BUILD_DIR)/test_topic_routing
+
+.PHONY: check-topic-names-cli
+check-topic-names-cli: $(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic
+	BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_topic_names_cli.py
+
+$(BUILD_DIR)/test_core_memory: test/test_core_memory.c $(SOURCE) $(HEADER)
+	mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -pthread -o $@ $< $(DEP_STATIC_LIBS)
+
+.PHONY: check-core-memory
+check-core-memory: $(BUILD_DIR)/test_core_memory
+	$(BUILD_DIR)/test_core_memory
+
+$(BUILD_DIR)/test_callback_shutdown: test/test_callback_shutdown.c test/test_core_memory.c $(SOURCE) $(HEADER)
+	mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -pthread -o $@ $< $(DEP_STATIC_LIBS)
+
+.PHONY: check-callback-shutdown
+check-callback-shutdown: $(BUILD_DIR)/test_callback_shutdown
+	$(BUILD_DIR)/test_callback_shutdown
+
+$(BUILD_DIR)/test_name_resolution_transport: test/test_name_resolution_transport.c $(HEADER) $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+
+.PHONY: check-name-resolution
+check-name-resolution: $(BUILD_DIR)/test_name_resolution_transport $(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic
+	BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_name_resolution_cli.py
+
+$(BUILD_DIR)/test_registration_failures: test/test_registration_failures.c test/test_core_memory.c $(SOURCE) $(HEADER)
+	mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -pthread -o $@ $< $(DEP_STATIC_LIBS)
+
+.PHONY: check-registration-failures
+check-registration-failures: $(BUILD_DIR)/test_registration_failures
+	$(BUILD_DIR)/test_registration_failures
+
+# Liaison integrity: deterministic framing/I/O and actual PTY/UDP/TCP transport.
+$(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/rosenet_tx $(BUILD_DIR)/roseserial: cmd/common/liaison.h
+$(BUILD_DIR)/roseserial: cmd/roseserial/frame.h
+
+$(BUILD_DIR)/test_liaison_io: test/test_liaison_io.c cmd/roseserial/core.c cmd/roseserial/frame.h cmd/common/liaison.h $(HEADER) $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -pthread -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+
+$(BUILD_DIR)/test_liaison_fixture: test/test_liaison_fixture.c $(HEADER) $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+
+.PHONY: check-liaison
+check-liaison: $(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/rosenet_tx $(BUILD_DIR)/roseserial $(BUILD_DIR)/test_liaison_io $(BUILD_DIR)/test_liaison_fixture
+	$(BUILD_DIR)/test_liaison_io
+	BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_liaison_integrity.py
+
+include test/embedded_serial.mk

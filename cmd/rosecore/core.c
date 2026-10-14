@@ -6,8 +6,8 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "core.h"
-#include "ros3.h"
 #include "../common/process.h"
+#include "ros3.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -57,10 +57,10 @@ static void copy_bounded_string(char *dst, size_t dst_size, const char *src) {
 
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
-	    || strcmp(arg, "--help") == 0
-	    || strcmp(arg, "/h") == 0
-	    || strcmp(arg, "/help") == 0
-	    || strcmp(arg, "/?") == 0;
+			|| strcmp(arg, "--help") == 0
+			|| strcmp(arg, "/h") == 0
+			|| strcmp(arg, "/help") == 0
+			|| strcmp(arg, "/?") == 0;
 }
 
 static void print_usage(const char *argv0) {
@@ -219,13 +219,17 @@ static tracked_node *find_or_create_node(const char *name) {
 	tracked_node *free_slot = NULL;
 	for(int i = 0; i < node_count; i++) {
 		if(!nodes[i].active) {
-			if(!free_slot) free_slot = &nodes[i];
+			if(!free_slot) {
+				free_slot = &nodes[i];
+			}
 		} else if(strcmp(nodes[i].name, name) == 0) {
 			return &nodes[i];
 		}
 	}
 	if(!free_slot) {
-		if(node_count >= MAX_NODES) return NULL;
+		if(node_count >= MAX_NODES) {
+			return NULL;
+		}
 		free_slot = &nodes[node_count++];
 	}
 	tracked_node *n = free_slot;
@@ -348,7 +352,7 @@ static void build_topic_csv(char *buf, size_t buf_size,
 
 // Send NodeInfo response for a tracked node
 static int send_node_info(quicksand_connection *conn, mirage_msg *out,
-			   tracked_node *n, i64 requester_pid, i64 request_timestamp) {
+			  tracked_node *n, i64 requester_pid, i64 request_timestamp) {
 	static char pubs_csv[MAX_TOPICS * MAX_NAME_LEN];
 	static char subs_csv[MAX_TOPICS * MAX_NAME_LEN];
 
@@ -369,8 +373,9 @@ static int send_node_info(quicksand_connection *conn, mirage_msg *out,
 		return -1;
 	}
 
-	if(requester_pid && (mirage_write_i64(out, requester_pid) < 0
-			    || mirage_write_i64(out, request_timestamp) < 0)) return -1;
+	if(requester_pid && (mirage_write_i64(out, requester_pid) < 0 || mirage_write_i64(out, request_timestamp) < 0)) {
+		return -1;
+	}
 
 	r = mirage_write_string(out, n->name, (i64) strlen(n->name));
 	if(r < 0) {
@@ -402,78 +407,104 @@ static int send_node_info(quicksand_connection *conn, mirage_msg *out,
 
 // Dump markers have no arguments; lookup Done echoes the request identity.
 static int send_query_marker(quicksand_connection *conn, mirage_msg *out,
-	const char *fn, i64 requester_pid, i64 request_timestamp) {
+			     const char *fn, i64 requester_pid, i64 request_timestamp) {
 	if(mirage_write_start(out) < 0
-	   || mirage_write_fn(out, fn, (i64) strlen(fn), requester_pid ? 2 : 0) < 0)
+	   || mirage_write_fn(out, fn, (i64) strlen(fn), requester_pid ? 2 : 0) < 0) {
 		return -1;
-	if(requester_pid && (mirage_write_i64(out, requester_pid) < 0
-			    || mirage_write_i64(out, request_timestamp) < 0)) return -1;
+	}
+	if(requester_pid && (mirage_write_i64(out, requester_pid) < 0 || mirage_write_i64(out, request_timestamp) < 0)) {
+		return -1;
+	}
 	return quicksand_write(conn, out->data, out->cursor) < 0 ? -1 : 0;
 }
 
 // Read only the request ring. Responses never re-enter the request queue.
 static void handle_query_request(quicksand_connection *dump,
-	quicksand_connection *lookup, mirage_msg *in, mirage_msg *out) {
+				 quicksand_connection *lookup, mirage_msg *in, mirage_msg *out) {
 	char fn[64], prefix[ROSE_MAX_NAME_LEN];
 	i64 len, argc, prefix_len = 0, target_pid = 0;
 	i64 requester_pid = 0, request_timestamp = 0;
 	in->cursor = 0;
 	if(mirage_read_start(in) < 0
-	   || mirage_read_fn(in, fn, &len, sizeof(fn) - 1, &argc) < 0) return;
+	   || mirage_read_fn(in, fn, &len, sizeof(fn) - 1, &argc) < 0) {
+		return;
+	}
 	fn[len] = '\0';
 	int is_dump = strcmp(fn, ROSE_MSG_DUMP_ALL) == 0;
 	int by_name = strcmp(fn, ROSE_MSG_LOOKUP_NAME) == 0;
 	int by_pid = strcmp(fn, ROSE_MSG_LOOKUP_PID) == 0;
-	if(!is_dump && !by_name && !by_pid) return;
-	if(argc != (is_dump ? 0 : 3)) return;
+	if(!is_dump && !by_name && !by_pid) {
+		return;
+	}
+	if(argc != (is_dump ? 0 : 3)) {
+		return;
+	}
 	if(!is_dump) {
 		if(mirage_read_i64(in, &requester_pid) < 0 || !rose_valid_pid(requester_pid)
-		   || mirage_read_i64(in, &request_timestamp) < 0 || request_timestamp <= 0) return;
+		   || mirage_read_i64(in, &request_timestamp) < 0 || request_timestamp <= 0) {
+			return;
+		}
 		if(by_name) {
-			if(mirage_read_string(in, prefix, &prefix_len, sizeof(prefix) - 1) < 0) return;
+			if(mirage_read_string(in, prefix, &prefix_len, sizeof(prefix) - 1) < 0) {
+				return;
+			}
 			prefix[prefix_len] = '\0';
-		} else if(mirage_read_i64(in, &target_pid) < 0 || !rose_valid_pid(target_pid)) return;
+		} else if(mirage_read_i64(in, &target_pid) < 0 || !rose_valid_pid(target_pid)) {
+			return;
+		}
 	}
 	quicksand_connection *conn = is_dump ? dump : lookup;
-	if(is_dump && send_query_marker(conn, out, ROSE_MSG_START, 0, 0) < 0) return;
+	if(is_dump && send_query_marker(conn, out, ROSE_MSG_START, 0, 0) < 0) {
+		return;
+	}
 	for(int i = 0; i < node_count; i++) {
 		tracked_node *n = &nodes[i];
-		if(!n->active || !rose_valid_pid(n->pid)) continue;
-		if(!is_dump && !(by_name ? strncmp(n->name, prefix, (size_t) prefix_len) == 0
-					: n->pid == target_pid)) continue;
+		if(!n->active || !rose_valid_pid(n->pid)) {
+			continue;
+		}
+		if(!is_dump && !(by_name ? strncmp(n->name, prefix, (size_t) prefix_len) == 0 : n->pid == target_pid)) {
+			continue;
+		}
 		if(send_node_info(conn, out, n, requester_pid, request_timestamp) < 0) {
 			fprintf(stderr, "[rosecore] Failed to publish query response\n");
 			return; // Do not report successful completion of a partial response.
 		}
 	}
-	if(send_query_marker(conn, out, ROSE_MSG_DONE, requester_pid, request_timestamp) < 0)
+	if(send_query_marker(conn, out, ROSE_MSG_DONE, requester_pid, request_timestamp) < 0) {
 		fprintf(stderr, "[rosecore] Failed to publish query completion\n");
+	}
 }
 
 /* Validate wire names through the same conversion as library and CLI input.
  * Percent is a wire separator only; literal percent and comma are never legal
  * user name characters, keeping slash encoding and topology CSV reversible. */
 static int valid_registration_name(const char *name, i64 length, int topic) {
-	if(length <= 0 || length > 255 || memchr(name, '\0', (size_t) length)) return 0;
+	if(length <= 0 || length > 255 || memchr(name, '\0', (size_t) length)) {
+		return 0;
+	}
 	char canonical[256];
 	if(!topic) {
-		return !memchr(name, '/', (size_t) length) &&
-			rose_topic_to_shm(canonical, sizeof(canonical), name) != NULL;
+		return name[0] != '/' && rose_topic_to_shm(canonical, sizeof(canonical), name) != NULL;
 	}
-	if(name[0] != '/') return 0;
+	if(name[0] != '/') {
+		return 0;
+	}
 	const char *separator = memchr(name, '%', (size_t) length);
-	if(!separator || separator == name + length - 1) return 0;
+	if(!separator || separator == name + length - 1) {
+		return 0;
+	}
 	char display[256];
 	size_t tail_length = (size_t) (name + length - separator - 1);
 	for(size_t i = 0; i < tail_length; ++i) {
 		char c = separator[1 + i];
 		/* Wire topics contain no slash except the initial slash. */
-		if(c == '/') return 0;
+		if(c == '/') {
+			return 0;
+		}
 		display[i] = c == '%' ? '/' : c;
 	}
 	display[tail_length] = '\0';
-	return rose_topic_to_shm(canonical, sizeof(canonical), display) &&
-		strcmp(canonical, name) == 0;
+	return rose_topic_to_shm(canonical, sizeof(canonical), display) && strcmp(canonical, name) == 0;
 }
 
 // Process a registration message and update node state
@@ -498,14 +529,18 @@ static void process_registration(mirage_msg *msg) {
 		return;
 	}
 	arg1[arg1_len] = '\0';
-	if(!valid_registration_name(arg1, arg1_len, 0)) return;
+	if(!valid_registration_name(arg1, arg1_len, 0)) {
+		return;
+	}
 
 	tracked_node *node = NULL;
 
 	if(strcmp(fn_name, ROSE_MSG_NODE_START) == 0) {
 		// NodeStart: check if alive, then set pid
 		if(mirage_read_i64(msg, &pid) >= 0) {
-			if(!rose_valid_pid(pid)) return;
+			if(!rose_valid_pid(pid)) {
+				return;
+			}
 			node = find_or_create_node(arg1);
 			if(node && bind_node_process(node, pid)) {
 				node->last_heartbeat = quicksand_now();
@@ -524,7 +559,9 @@ static void process_registration(mirage_msg *msg) {
 				return;
 			}
 			// Check if process is still alive
-			if(!rose_valid_pid(pid)) return;
+			if(!rose_valid_pid(pid)) {
+				return;
+			}
 			node = find_or_create_node(arg1);
 			if(node && bind_node_process(node, pid)) {
 				node->last_heartbeat = now;
@@ -534,7 +571,9 @@ static void process_registration(mirage_msg *msg) {
 		// PubRegister: add topic to node's pub list
 		if(mirage_read_string(msg, arg2, &arg2_len, sizeof(arg2) - 1) >= 0) {
 			arg2[arg2_len] = '\0';
-			if(!valid_registration_name(arg2, arg2_len, 1)) return;
+			if(!valid_registration_name(arg2, arg2_len, 1)) {
+				return;
+			}
 			node = find_or_create_node(arg1);
 			add_publisher(node, arg2);
 			printf("[rosecore] %s: node=%s topic=%s\n",
@@ -544,7 +583,9 @@ static void process_registration(mirage_msg *msg) {
 		// SubRegister: add topic to node's sub list
 		if(mirage_read_string(msg, arg2, &arg2_len, sizeof(arg2) - 1) >= 0) {
 			arg2[arg2_len] = '\0';
-			if(!valid_registration_name(arg2, arg2_len, 1)) return;
+			if(!valid_registration_name(arg2, arg2_len, 1)) {
+				return;
+			}
 			node = find_or_create_node(arg1);
 			add_subscriber(node, arg2);
 			printf("[rosecore] %s: node=%s topic=%s\n",
@@ -591,7 +632,7 @@ int rosecore_main(int argc, char **argv) {
 	printf("[rosecore] Starting rosecore daemon...\n");
 
 	if(!rose_topic_to_shm(heartbeat_topic, sizeof(heartbeat_topic),
-			     "rosecore_heartbeat")) {
+			      ROSE_TOPIC_HEARTBEAT)) {
 		fprintf(stderr, "[rosecore] %s\n", rose_last_error());
 		exit_code = 1;
 		goto cleanup;
@@ -630,7 +671,7 @@ int rosecore_main(int argc, char **argv) {
 	printf("[rosecore] Creating topic: %s\n", topic);
 
 	// Create the rosecore topic - we're a publisher but we'll read from it
-	ret = quicksand_connect(&pub, topic, -1, 512, 8192, NULL);
+	ret = quicksand_connect(&pub, topic, -1, ROSE_REGISTRATION_MSG_SIZE, 8192, NULL);
 	if(ret != 0) {
 		fprintf(stderr, "[rosecore] Failed to create topic: %ld\n", (long) ret);
 		exit_code = 1;
@@ -663,7 +704,7 @@ int rosecore_main(int argc, char **argv) {
 
 	rose_topic_to_shm(request_topic, sizeof(request_topic), ROSE_TOPIC_REQUEST);
 	ret = quicksand_connect(&request_conn, request_topic, -1,
-		ROSE_REQUEST_MSG_SIZE, ROSE_REQUEST_RING_SIZE, NULL);
+				ROSE_REQUEST_MSG_SIZE, ROSE_REQUEST_RING_SIZE, NULL);
 	if(ret != 0) {
 		fprintf(stderr, "[rosecore] Failed to create request topic: %ld\n", (long) ret);
 		exit_code = 1;
@@ -671,7 +712,7 @@ int rosecore_main(int argc, char **argv) {
 	}
 	// Discard requests from before this daemon instance was ready.
 	request_conn->read_index = atomic_load_explicit(&request_conn->buffer->index,
-						      memory_order_acquire);
+							memory_order_acquire);
 	request_conn->read_stamp = quicksand_now();
 
 	printf("[rosecore] Ready. Listening for node registrations...\n");
@@ -721,7 +762,9 @@ int rosecore_main(int argc, char **argv) {
 		for(int requests = 0; requests < ROSE_REQUEST_RING_SIZE; requests++) {
 			sz = query_msg->max_length;
 			r = quicksand_read(request_conn, query_msg->data, &sz);
-			if(r < 0) break;
+			if(r < 0) {
+				break;
+			}
 			query_msg->length = sz;
 			handle_query_request(dump_conn, lookup_conn, query_msg, query_msg);
 		}
@@ -740,7 +783,9 @@ int rosecore_main(int argc, char **argv) {
 	printf("[rosecore] Shutting down...\n");
 cleanup:
 	for(int i = 0; i < node_count; i++) {
-		if(nodes[i].active) release_node(&nodes[i]);
+		if(nodes[i].active) {
+			release_node(&nodes[i]);
+		}
 	}
 	node_count = 0;
 	mirage_destroy(&query_msg, NULL);

@@ -69,7 +69,7 @@ Publisher - C
 #include <ros3.h>
 
 int main(int argc, char **argv) {
-	rose_node *node = rose_init((char)argc, argv, "c_pub", NULL, NULL);
+	rose_node *node = rose_init(argc, argv, "c_pub", NULL, NULL);
 	rose_publisher *pub = rose_create_pub(node, "/chatter", -1, 1024, 128);
 	mirage_msg *msg = mirage_create(1024, NULL);
 
@@ -91,7 +91,7 @@ Subscriber - C
 #include <stdio.h>
 
 int main(int argc, char **argv) {
-	rose_node *node = rose_init((char)argc, argv, "c_sub", NULL, NULL);
+	rose_node *node = rose_init(argc, argv, "c_sub", NULL, NULL);
 	rose_subscriber *sub = rose_create_sub(node, "/chatter", -1, 1, NULL);
 	mirage_msg *msg = mirage_create(1024, NULL);
 	char text[256];
@@ -159,6 +159,19 @@ while node.ok():
 
 `publisher.publish(...)` encodes with mirage 🔮 automatically, and `subscriber` yields decoded Python objects.
 
+`node.subscriber("topic", latest_only=True)` consumes the newest queued message
+for `read()`, `read_raw()`, and iteration, skipping older messages. The default
+consumes messages in order. `read_latest()` and `read_latest_raw()` explicitly
+consume the newest message under either policy. Reads return `None` when no data
+is available; iteration yields a decoded `None` payload normally.
+
+Use `with ros3.Node("name") as node:` or call `node.close()` / `node.shutdown()`
+to release resources. Closing is idempotent and closes every endpoint; further
+operations raise `RuntimeError`. Endpoints retain the native node if its Python
+`Node` object is collected. The last handle releases resources automatically.
+Native node operations are serialized across Python threads, and subscriber
+reads also protect the buffer copy before decoding.
+
 ## Build and Install 📖
 
 Install dependencies first:
@@ -220,6 +233,34 @@ Shared environment:
 
 - `ROSE_BASE` - namespace prefix for one robot or environment
 - `ROSE_QUERY_TIMEOUT_MS` - query timeout for CLI tools
+
+Names and routing:
+
+`ROSE_BASE` defaults to `rose` and is one nonempty ASCII token, optionally
+surrounded by `/`. Each node captures it at creation. Changing the environment
+later affects new nodes and standalone CLI conversions, not existing nodes.
+With `ROSE_BASE=robot1` and `__ns:=front`, `camera` resolves to
+`/robot1%front%camera` and `/camera` resolves to `/robot1%camera`.
+
+Name segments allow letters, digits, `_`, `-`, and `.`. Topics have no empty
+segments or trailing slash; namespaces accept an optional leading/trailing slash
+and `/` means root. `%`, commas and embedded NULs are invalid. Every complete
+transport name, including internal channel suffixes, is limited to 255 bytes
+plus its terminating NUL. The longest core suffix currently limits the base
+token to 235 bytes; node namespaces/names must also leave room for PID and
+private channel suffixes.
+
+`source:=destination` rules compare namespace-resolved sources, use the last
+matching rule, and apply once. Relative destinations use the node namespace;
+absolute destinations use its captured base. Construction rejects any invalid
+rule, including an unused or shadowed rule.
+
+Discovery and Python `Node.name` identify nodes as `namespace/name-PID`, or
+`name-PID` at root. Names must be unique within a namespace and process.
+`rosenode info front/camera` matches that full identity; PID lookup remains
+available and process signals affect all its nodes. Upgrade the library,
+Rosecore, CLI and bindings together: namespaced registration names now contain
+slashes, and the public C API/structure requires rebuilding consumers.
 
 ## Web Docs 📚
 

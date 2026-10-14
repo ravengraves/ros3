@@ -2,13 +2,7 @@
 #include <string.h>
 
 static int is_help_arg(const char *arg) {
-	return arg && (
-		strcmp(arg, "-h") == 0 ||
-		strcmp(arg, "--help") == 0 ||
-		strcmp(arg, "/h") == 0 ||
-		strcmp(arg, "/help") == 0 ||
-		strcmp(arg, "/?") == 0
-	);
+	return arg && (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0 || strcmp(arg, "/h") == 0 || strcmp(arg, "/help") == 0 || strcmp(arg, "/?") == 0);
 }
 
 int main(int argc, char **argv) {

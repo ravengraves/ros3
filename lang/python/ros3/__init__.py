@@ -39,6 +39,12 @@ from .ros3 import (
     log_fatal,
 )
 
+# Conventional constant names coexist with the existing lowercase aliases.
+ROSE_LOG_INFO = log_info
+ROSE_LOG_WARN = log_warn
+ROSE_LOG_ERROR = log_error
+ROSE_LOG_FATAL = log_fatal
+
 # Keep elapsed_seconds as alias for compatibility
 elapsed_seconds = elapsed
 

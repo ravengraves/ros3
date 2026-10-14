@@ -68,6 +68,14 @@ Commands and options:
 - Options:
   `--topic`, `--port`, `--udp`, `--message_size`, `--message_rate`
 
+Network `--message_size` is the exact encoded payload cap (default 65536,
+maximum 16MiB), with no benchmark inflation. RX `--message_rate` is a slot
+count (default 64); its aligned ring allocation must fit 64MiB. UDP payloads
+are capped at 65507 bytes; truncated datagrams are dropped. Source samples
+over the configured/transport limit are consumed and dropped, allowing later
+valid samples through. TCP frames retain a little-endian u32 length and have
+a one-second whole-frame deadline. I/O/publication failures return nonzero.
+
 ### roseserial
 
 Topic: serial microcontroller bridge to ROS3 topics.

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 from typing import Any, Iterator
+from threading import RLock
 from . import _ros3 as _c
 
 import mirage  # Required dependency for message encoding/decoding
@@ -41,6 +42,10 @@ def _coerce_log_message(message: str | bytes | bytearray | memoryview) -> Any:
 class Node:
     """A Rose node that can create publishers and subscribers.
 
+    Native calls are serialized across nodes for safe C library access. Publishers
+    and subscribers retain the native node until they are released. Explicit
+    shutdown closes all endpoints; subsequent operations raise RuntimeError.
+
     Example:
         import ros3 as rose
 
@@ -59,14 +64,14 @@ class Node:
         """Create a new ROS3 node.
 
         Args:
-            name: Node name (PID is appended automatically for uniqueness)
-            prefix: Optional namespace prefix for topics
+            name: One-segment name, unique within this process and namespace
+            prefix: Optional namespace for identity and relative topics
         """
         self._capsule, self._name = _c.create_node(name, prefix=prefix)
 
     @property
     def name(self) -> str:
-        """The node's full name (includes PID suffix)."""
+        """The registry name: namespace/name-PID, or name-PID at root."""
         return self._name
 
     def ok(self) -> bool:
@@ -83,23 +88,25 @@ class Node:
 
     def info(self, message: str | bytes | bytearray | memoryview) -> None:
         """Log an informational message through this node."""
-        self.log(ROSE_LOG_INFO, message)
+        self.log(log_info, message)
 
     def warn(self, message: str | bytes | bytearray | memoryview) -> None:
         """Log a warning message through this node."""
-        self.log(ROSE_LOG_WARN, message)
+        self.log(log_warn, message)
 
     def error(self, message: str | bytes | bytearray | memoryview) -> None:
         """Log an error message through this node."""
-        self.log(ROSE_LOG_ERROR, message)
+        self.log(log_error, message)
 
     def fatal(self, message: str | bytes | bytearray | memoryview) -> None:
         """Log a fatal message through this node."""
-        self.log(ROSE_LOG_FATAL, message)
+        self.log(log_fatal, message)
 
     def shutdown(self) -> None:
-        """Shutdown the node and release resources."""
+        """Close the node and its endpoints. Repeated calls are harmless."""
         _c.shutdown(self._capsule)
+
+    close = shutdown
 
     def publisher(self, topic: str, *, message_size: int,
                   rate: int) -> Publisher:
@@ -180,6 +187,7 @@ class Subscriber:
 
     def __init__(self, node_capsule, topic: str, latest_only: bool):
         self._topic = topic
+        self._read_lock = RLock()
         self._capsule, self._message_size = _c.create_sub(
             node_capsule, topic, 1 if latest_only else 0
         )
@@ -190,41 +198,54 @@ class Subscriber:
         """The topic name."""
         return self._topic
 
+    def _read_raw(self, *, latest: bool = False) -> bytes | None:
+        # Include the copy in the critical section: native I/O releases the GIL.
+        with self._read_lock:
+            if latest:
+                length = _c.readlast(self._capsule, self._buffer)
+            else:
+                result = _c.read(self._capsule, self._buffer)
+                length = None if result is None else result[0]
+            return None if length is None else bytes(self._buffer[:length])
+
     def read(self) -> Any | None:
-        """Read and decode the next message, or None if unavailable."""
-        result = _c.read(self._capsule, self._buffer)
-        if result is None:
-            return None
-        length, _ = result
-        return mirage.decode_from(self._buffer, length)
+        """Read one message, or None if unavailable.
+
+        With latest_only=True, consume the newest queued message and skip older
+        messages. Otherwise consume the next queued message in order.
+        """
+        data = self._read_raw()
+        return None if data is None else mirage.decode(data)
 
     def read_latest(self) -> Any | None:
-        """Read the most recent message, skipping any older queued messages."""
-        length = _c.readlast(self._capsule, self._buffer)
-        if length is None:
-            return None
-        return mirage.decode_from(self._buffer, length)
+        """Consume the newest queued message, regardless of latest_only."""
+        data = self._read_raw(latest=True)
+        return None if data is None else mirage.decode(data)
 
     def read_raw(self) -> bytes | None:
-        """Read the next message as raw bytes (not decoded)."""
-        result = _c.read(self._capsule, self._buffer)
-        if result is None:
-            return None
-        length, _ = result
-        return bytes(self._buffer[:length])
+        """Read bytes using the subscriber's latest_only policy."""
+        return self._read_raw()
+
+    def read_latest_raw(self) -> bytes | None:
+        """Consume the newest queued message as bytes, skipping older messages."""
+        return self._read_raw(latest=True)
 
     def __iter__(self) -> Iterator[Any]:
-        """Iterate over all queued messages (non-blocking)."""
+        """Poll queued messages using latest_only; stop when no data remains.
+
+        A decoded None is yielded normally. Messages arriving during iteration
+        may also be yielded.
+        """
         while True:
-            msg = self.read()
-            if msg is None:
+            data = self._read_raw()
+            if data is None:
                 return
-            yield msg
+            yield mirage.decode(data)
 
     def __len__(self) -> int:
         """Number of messages waiting to be read."""
         val = _c.remaining(self._capsule)
-        return 0 if val > (1 << 62) else val  # Handle underflow
+        return 0 if val > (1 << 62) else val  # Handle native count underflow
 
 
 class Rate:

@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
 	}
 
 	char node_name[] = "cpp_publisher";
-	rose_node *node = rose_init((char) argc, argv, node_name, nullptr, nullptr);
+	rose_node *node = rose_init(argc, argv, node_name, nullptr, nullptr);
 	if(!node) {
 		std::fprintf(stderr, "Failed to initialize node\n");
 		return 1;

@@ -10,9 +10,9 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "core.h"
-#include "ros3.h"
 #include "../common/process.h"
 #include "../common/query.h"
+#include "ros3.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -24,10 +24,10 @@
 
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
-	    || strcmp(arg, "--help") == 0
-	    || strcmp(arg, "/h") == 0
-	    || strcmp(arg, "/help") == 0
-	    || strcmp(arg, "/?") == 0;
+			|| strcmp(arg, "--help") == 0
+			|| strcmp(arg, "/h") == 0
+			|| strcmp(arg, "/help") == 0
+			|| strcmp(arg, "/?") == 0;
 }
 
 static int is_pid_flag(const char *arg) {
@@ -132,9 +132,9 @@ static int read_and_print_list(quicksand_connection *conn, rose_query *query) {
 		if(r >= 0) {
 			msg->length = sz;
 			int res = rose_query_parse(query, msg, name, sizeof(name),
-						  &pid, &last_heartbeat,
-						  pubs, sizeof(pubs),
-						  subs, sizeof(subs));
+						   &pid, &last_heartbeat,
+						   pubs, sizeof(pubs),
+						   subs, sizeof(subs));
 			if(res == 0) {
 				// Done
 				break;
@@ -147,7 +147,9 @@ static int read_and_print_list(quicksand_connection *conn, rose_query *query) {
 	}
 
 	mirage_destroy(&msg, NULL);
-	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+	}
 	return query->complete ? 0 : 1;
 }
 
@@ -175,13 +177,12 @@ static int read_and_print_info(quicksand_connection *conn, rose_query *query, co
 		if(r >= 0) {
 			msg->length = sz;
 			int res = rose_query_parse(query, msg, name, sizeof(name),
-						  &pid, &last_heartbeat,
-						  pubs, sizeof(pubs),
-						  subs, sizeof(subs));
+						   &pid, &last_heartbeat,
+						   pubs, sizeof(pubs),
+						   subs, sizeof(subs));
 			if(res == 0) {
 				break;
-			} else if(res == 1 && (prefix ? strncmp(name, prefix, strlen(prefix)) == 0
-						 : pid == expected_pid)) {
+			} else if(res == 1 && (prefix ? strncmp(name, prefix, strlen(prefix)) == 0 : pid == expected_pid)) {
 				found++;
 				printf("Node: %s\n", name);
 				printf("  PID: %ld\n", (long) pid);
@@ -204,7 +205,9 @@ static int read_and_print_info(quicksand_connection *conn, rose_query *query, co
 	}
 
 	mirage_destroy(&msg, NULL);
-	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+	}
 	return query->complete ? 0 : 1;
 }
 
@@ -235,9 +238,9 @@ static int read_and_kill(quicksand_connection *conn, rose_query *query, int use_
 		if(r >= 0) {
 			msg->length = sz;
 			int res = rose_query_parse(query, msg, name, sizeof(name),
-						  &pid, &last_heartbeat,
-						  pubs, sizeof(pubs),
-						  subs, sizeof(subs));
+						   &pid, &last_heartbeat,
+						   pubs, sizeof(pubs),
+						   subs, sizeof(subs));
 			if(res == 0) {
 				break;
 			} else if(res == 1 && rose_valid_pid(pid)
@@ -261,7 +264,9 @@ static int read_and_kill(quicksand_connection *conn, rose_query *query, int use_
 	}
 
 	mirage_destroy(&msg, NULL);
-	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+	}
 	return query->complete ? 0 : 1;
 }
 

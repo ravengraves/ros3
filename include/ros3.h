@@ -75,6 +75,15 @@ struct rose_node {
 	void (*deallocator)(void *);
 
 	u64 last_heartbeat_ns; // Timestamp of last heartbeat sent (nanoseconds)
+
+	// Scratch storage belongs to this node and uses its allocator pair.
+	mirage_msg *registration_scratch;
+	mirage_msg *callback_scratch;
+	mirage_msg *param_request_scratch;
+	mirage_msg *param_wrapper_scratch;
+	// Per-node dispatch lifetime; all access requires external serialization.
+	int spin_active;
+	int shutdown_requested;
 };
 
 
@@ -103,19 +112,53 @@ i64 rose_last_error_code(void);
 #define ROSE_MSG_LOOKUP_PID "LookupPid"
 #define ROSE_MSG_NODE_INFO "NodeInfo"
 #define ROSE_MSG_DONE "Done"
+#define ROSE_MSG_START "Start"
 
 // Query topic suffixes (appended to ROSE_BASE)
+#define ROSE_TOPIC_REQUEST "rosecore_request"
+#define ROSE_REQUEST_RING_SIZE 128
+#define ROSE_REQUEST_MSG_SIZE 512
+
 #define ROSE_TOPIC_DUMP "rosecore_dump"
 #define ROSE_TOPIC_LOOKUP "rosecore_lookup"
+#define ROSE_TOPIC_HEARTBEAT "rosecore_heartbeat"
 
-// Query sizing constants
-#define ROSE_QUERY_MSG_SIZE 33024 // (64+64)*256 + 256
-#define ROSE_DUMP_RING_SIZE 8192  // 2048*4 messages
-#define ROSE_LOOKUP_RING_SIZE 256 // fewer expected
+// Registry bounds include the terminating NUL in each name buffer.
+#define ROSE_MAX_NODES 1024
+#define ROSE_MAX_TOPICS 64
+#define ROSE_MAX_NAME_LEN 256
+// Two bounded names plus Mirage framing; no dependence on transport padding.
+#define ROSE_REGISTRATION_MSG_SIZE (2 * ROSE_MAX_NAME_LEN + 32)
+#define ROSE_TOPIC_CSV_SIZE (ROSE_MAX_TOPICS * ROSE_MAX_NAME_LEN)
+// One NodeInfo per slot: name, both CSV lists, and a conservative allowance
+// for Mirage framing, function name, field tags/lengths, PID and timestamp.
+#define ROSE_QUERY_MSG_SIZE (ROSE_MAX_NAME_LEN + 2 * ROSE_TOPIC_CSV_SIZE + 256)
+// Request three dump slots per maximum node; Quicksand rounds up to a
+// power of two. Half-ring retention accommodates a full dump plus Done.
+#define ROSE_DUMP_RING_SIZE (3 * ROSE_MAX_NODES)
+// Sized for targeted lookups; broad prefixes can exceed retained capacity.
+#define ROSE_LOOKUP_RING_SIZE 128
 
 /// ---------------- Initialization---------------------------------------------
 
-rose_node *rose_init(char argc, char **argv, char *name,
+/* Names use ASCII letters, digits, '_', '-', and '.' in nonempty segments.
+ * Topics may have one leading slash, but no trailing slash or '//'. Node
+ * names are one segment. ROSE_BASE is one nonempty segment with an optional
+ * leading/trailing slash; namespaces may contain slash-separated segments.
+ * Literal '%' and ',' are rejected.
+ * Topic remaps match fully namespace-resolved sources, last match wins, and
+ * apply once. Relative destinations use the node namespace; absolute ones
+ * use the ROSE_BASE captured at construction, even if the environment changes.
+ * All rules, including shadowed rules, must fully resolve within 255 bytes at
+ * construction; invalid configuration rejects the node before attaching rings.
+ * All transport names (including private channel suffixes) fit 255 bytes,
+ * plus a separate byte for NUL. Standalone rose_topic_to_shm uses current env.
+ * n->name and discovery use "namespace/name-PID", or "name-PID" at root.
+ * Namespaces are relative to the base. A name must be unique within its
+ * namespace and process; duplicate instances there are unsupported.
+ * Namespaced identities require updated library, core, CLI and bindings together. */
+
+rose_node *rose_init(int argc, char **argv, char *name,
 		     void *(*alloc)(size_t), void (*deallocator)(void *));
 
 rose_node *rose_create_node(char *name, i64 name_length,
@@ -123,11 +166,30 @@ rose_node *rose_create_node(char *name, i64 name_length,
 			    char *remaps, u64 *remap_string_lengths, u64 remap_count,
 			    void *(*alloc)(size_t), void (*deallocator)(void *));
 
+// Allocator hooks must be supplied as a pair, or both NULL for malloc/free.
+// Names/prefixes accept -1 for strlen or exact byte spans without embedded NULs.
+// Remap storage transfers to the node only on successful construction; on
+// failure it remains caller-owned. Transferred storage must use the same hooks.
+// Construction returns NULL if initial discovery encoding/allocation/write fails.
+// Check rose_last_error_code/message; success means the registration was written
+// to the transport, not acknowledged by rosecore.
+// Remaps contain 2*count NUL-terminated strings and matching lengths excluding
+// NUL. The caller must provide buffers covering those lengths and terminators;
+// this API has no aggregate capacities. Do not mutate transferred storage.
+
+// During this node's callback dispatch, shutdown is deferred until the spin
+// call returns, and no subsequent callbacks run. Repeated requests during that
+// callback are safe. Outside dispatch destruction is immediate. The pointer
+// must not be used after destruction.
 void rose_shutdown(rose_node *n);
 
 i64 rose_ok(rose_node *n);
 
 /// ---------------- Pub / Sub -------------------------------------------------
+
+// Endpoint constructors return NULL and leave table lengths unchanged if their
+// discovery registration fails. Partial connections are disconnected without
+// unlinking shared channels; callers may retry after inspecting the last error.
 
 rose_publisher *rose_create_pub(rose_node *n, char *name, i64 name_length,
 				u64 message_length, u64 message_hz);
@@ -145,6 +207,13 @@ i64 rose_readlast(rose_subscriber *s, rosemsg *msg);
 
 u64 rose_remaining(rose_subscriber *s);
 
+// Spin a node from one thread at a time. Callback scratch is node-owned and
+// valid only for the callback; do not retain it beyond callback return.
+// Same-node recursive spinning is rejected with ROSE_ERR_BADINPUT. Callback
+// messages remain valid through callback return, including after shutdown is
+// requested. Both spin functions return after a callback requests shutdown;
+// the node is destroyed before that outer spin call returns. Different nodes
+// may be spun recursively, provided their lifetimes are externally serialized.
 void rose_spin_once(rose_node *n);
 
 void rose_spin_forever(rose_node *n);

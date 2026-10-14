@@ -159,8 +159,8 @@ build .ninja-install-docs.stamp: run FORCE | $builddir/docs/man/man1/rosecore.1 
   cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/share/man/man1 && install -m 0644 $builddir/docs/man/man1/rosecore.1 $builddir/docs/man/man1/rosenode.1 $builddir/docs/man/man1/rosetopic.1 $builddir/docs/man/man1/rosenet_tx.1 $builddir/docs/man/man1/rosenet_rx.1 $builddir/docs/man/man1/roseserial.1 $$dest$$prefix/share/man/man1/ && touch .ninja-install-docs.stamp
   name = install-docs
 
-build .ninja-install-lib.stamp: run FORCE | $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $builddir/ros3.pc
-  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/lib $$dest$$prefix/include $$dest$$prefix/lib/pkgconfig && install -m 0644 $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $$dest$$prefix/lib/ && install -m 0644 include/ros3.h $$dest$$prefix/include/ros3.h && install -m 0644 $builddir/ros3.pc $$dest$$prefix/lib/pkgconfig/ros3.pc && touch .ninja-install-lib.stamp
+build .ninja-install-lib.stamp: run FORCE | include/ros3_embedded.h $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $builddir/ros3.pc
+  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; mkdir -p $$dest$$prefix/lib $$dest$$prefix/include $$dest$$prefix/lib/pkgconfig && install -m 0644 $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $$dest$$prefix/lib/ && install -m 0644 include/ros3.h include/ros3_embedded.h $$dest$$prefix/include/ && install -m 0644 $builddir/ros3.pc $$dest$$prefix/lib/pkgconfig/ros3.pc && touch .ninja-install-lib.stamp
   name = install-lib
 
 build .ninja-uninstall-bin.stamp: run FORCE
@@ -172,7 +172,7 @@ build .ninja-uninstall-docs.stamp: run FORCE
   name = uninstall-docs
 
 build .ninja-uninstall-lib.stamp: run FORCE
-  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; rm -f $$dest$$prefix/lib/libros3.so $$dest$$prefix/lib/libros3.a $$dest$$prefix/lib/libros3_gcc_lto.a $$dest$$prefix/include/ros3.h $$dest$$prefix/lib/pkgconfig/ros3.pc && touch .ninja-uninstall-lib.stamp
+  cmd = prefix=$${PREFIX:-/usr/local}; dest=$${DESTDIR:-}; rm -f $$dest$$prefix/lib/libros3.so $$dest$$prefix/lib/libros3.a $$dest$$prefix/lib/libros3_gcc_lto.a $$dest$$prefix/include/ros3.h $$dest$$prefix/include/ros3_embedded.h $$dest$$prefix/lib/pkgconfig/ros3.pc && touch .ninja-uninstall-lib.stamp
   name = uninstall-lib
 
 build all: phony $builddir/libros3.so $builddir/libros3.a $builddir/libros3_gcc_lto.a $builddir/rosecore $builddir/rosenode $builddir/rosetopic $builddir/rosenet_tx $builddir/rosenet_rx $builddir/roseserial $builddir/test $builddir/test_net_pub $builddir/test_net_sub $builddir/test_cpp_publisher $builddir/test_cpp_subscriber
@@ -197,3 +197,17 @@ build uninstall-lib: phony .ninja-uninstall-lib.stamp
 build uninstall: phony uninstall-bin uninstall-docs uninstall-lib
 
 default all
+
+# Optional embedded checks share the portable/AVR recipes with Make.
+build .ninja-check-embedded.stamp: run FORCE
+  cmd = make BUILD_DIR=$builddir check-embedded && touch .ninja-check-embedded.stamp
+  name = check-embedded
+build check-embedded: phony .ninja-check-embedded.stamp
+build .ninja-embedded-avr.stamp: run FORCE
+  cmd = make BUILD_DIR=$builddir embedded-avr && touch .ninja-embedded-avr.stamp
+  name = embedded-avr
+build embedded-avr: phony .ninja-embedded-avr.stamp
+build .ninja-check-embedded-avr.stamp: run FORCE
+  cmd = make BUILD_DIR=$builddir check-embedded-avr && touch .ninja-check-embedded-avr.stamp
+  name = check-embedded-avr
+build check-embedded-avr: phony .ninja-check-embedded-avr.stamp

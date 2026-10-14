@@ -10,9 +10,9 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "core.h"
-#include "ros3.h"
 #include "../common/process.h"
 #include "../common/query.h"
+#include "ros3.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -23,10 +23,10 @@
 
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
-	    || strcmp(arg, "--help") == 0
-	    || strcmp(arg, "/h") == 0
-	    || strcmp(arg, "/help") == 0
-	    || strcmp(arg, "/?") == 0;
+			|| strcmp(arg, "--help") == 0
+			|| strcmp(arg, "/h") == 0
+			|| strcmp(arg, "/help") == 0
+			|| strcmp(arg, "/?") == 0;
 }
 
 static volatile int running = 1;
@@ -253,9 +253,9 @@ static int read_and_print_topics(quicksand_connection *conn, rose_query *query) 
 		if(r >= 0) {
 			msg->length = sz;
 			int res = rose_query_parse(query, msg, name, sizeof(name),
-						  &pid, &last_heartbeat,
-						  pubs, sizeof(pubs),
-						  subs, sizeof(subs));
+						   &pid, &last_heartbeat,
+						   pubs, sizeof(pubs),
+						   subs, sizeof(subs));
 			if(res == 0) {
 				break;
 			} else if(res == 1) {
@@ -282,13 +282,15 @@ static int read_and_print_topics(quicksand_connection *conn, rose_query *query) 
 	}
 
 	mirage_destroy(&msg, NULL);
-	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+	}
 	return query->complete ? 0 : 1;
 }
 
 // Read responses and print info for a specific topic
 static int read_and_print_topic_info(quicksand_connection *conn, rose_query *query,
-				      const char *topic_filter) {
+				     const char *topic_filter) {
 	mirage_msg *msg = mirage_create(ROSE_QUERY_MSG_SIZE, NULL);
 	if(!msg) {
 		fprintf(stderr, "Failed to allocate message buffer\n");
@@ -301,8 +303,8 @@ static int read_and_print_topic_info(quicksand_connection *conn, rose_query *que
 	i64 pid, last_heartbeat;
 
 	// Collect publishers and subscribers
-	static char publishers[256][256];
-	static char subscribers[256][256];
+	static char publishers[256][ROSE_MAX_NAME_LEN + 32];
+	static char subscribers[256][ROSE_MAX_NAME_LEN + 32];
 	int pub_count = 0, sub_count = 0;
 
 	int timeout_ms = get_query_timeout_ms();
@@ -315,16 +317,16 @@ static int read_and_print_topic_info(quicksand_connection *conn, rose_query *que
 		if(r >= 0) {
 			msg->length = sz;
 			int res = rose_query_parse(query, msg, name, sizeof(name),
-						  &pid, &last_heartbeat,
-						  pubs, sizeof(pubs),
-						  subs, sizeof(subs));
+						   &pid, &last_heartbeat,
+						   pubs, sizeof(pubs),
+						   subs, sizeof(subs));
 			if(res == 0) {
 				break;
 			} else if(res == 1) {
 				// Check if this node publishes to topic
 				if(csv_contains_topic(pubs, topic_filter)) {
 					if(pub_count < 256) {
-						snprintf(publishers[pub_count], 256, "%.220s (pid %ld)",
+						snprintf(publishers[pub_count], sizeof(publishers[pub_count]), "%s (pid %ld)",
 							 name, (long) pid);
 						pub_count++;
 					}
@@ -332,7 +334,7 @@ static int read_and_print_topic_info(quicksand_connection *conn, rose_query *que
 				// Check if this node subscribes to topic
 				if(csv_contains_topic(subs, topic_filter)) {
 					if(sub_count < 256) {
-						snprintf(subscribers[sub_count], 256, "%.220s (pid %ld)",
+						snprintf(subscribers[sub_count], sizeof(subscribers[sub_count]), "%s (pid %ld)",
 							 name, (long) pid);
 						sub_count++;
 					}
@@ -371,7 +373,9 @@ static int read_and_print_topic_info(quicksand_connection *conn, rose_query *que
 	}
 
 	mirage_destroy(&msg, NULL);
-	if(!query->complete) fprintf(stderr, "Query timed out before Done\n");
+	if(!query->complete) {
+		fprintf(stderr, "Query timed out before Done\n");
+	}
 	return query->complete ? 0 : 1;
 }
 

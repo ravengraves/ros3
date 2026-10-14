@@ -217,10 +217,10 @@ def test_pubsub_latest_only():
 
     rose.sleep(0.01)
 
-    msg = sub.read_latest()
-    if msg is not None:
-        assert msg[1] == 4, f"should get latest message (4), got {msg}"
-        print(f"  Got latest: {msg}")
+    msg = sub.read()
+    assert msg == ["Hello", 4], f"should get latest message (4), got {msg}"
+    assert sub.read() is None
+    print(f"  Got latest: {msg}")
 
     node.shutdown()
     print("  PASSED")

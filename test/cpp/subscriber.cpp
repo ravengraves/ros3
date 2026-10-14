@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
 	int64_t max_messages = (argc > 2) ? parse_i64(argv[2], -1) : -1;
 
 	char node_name[] = "cpp_subscriber";
-	rose_node *node = rose_init((char) argc, argv, node_name, nullptr, nullptr);
+	rose_node *node = rose_init(argc, argv, node_name, nullptr, nullptr);
 	if(!node) {
 		std::fprintf(stderr, "Failed to initialize node\n");
 		return 1;

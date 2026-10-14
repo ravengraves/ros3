@@ -45,4 +45,6 @@ $ rosetopic rm /chatter
 # ENVIRONMENT
 
 - *ROSE_BASE*: Namespace prefix (default: _rose_).
-- *ROSE_QUERY_TIMEOUT_MS*: Query timeout in milliseconds.
+- *ROSE_QUERY_TIMEOUT_MS*: Absolute query timeout in milliseconds (default 1000).
+  Unrelated replies do not extend the deadline. An incomplete query exits with
+  a nonzero status.

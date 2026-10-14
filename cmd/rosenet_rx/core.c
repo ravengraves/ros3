@@ -6,6 +6,7 @@
 #include "core.h"
 #include "ros3.h"
 
+#include "../common/liaison.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <limits.h>
@@ -21,14 +22,14 @@
 
 static int is_help_arg(const char *arg) {
 	return strcmp(arg, "-h") == 0
-	    || strcmp(arg, "--help") == 0
-	    || strcmp(arg, "/h") == 0
-	    || strcmp(arg, "/help") == 0
-	    || strcmp(arg, "/?") == 0;
+			|| strcmp(arg, "--help") == 0
+			|| strcmp(arg, "/h") == 0
+			|| strcmp(arg, "/help") == 0
+			|| strcmp(arg, "/?") == 0;
 }
 
 static int is_option_token(const char *arg) {
-	return arg && (arg[0] == '-' || arg[0] == '/');
+	return arg && arg[0] == '-';
 }
 
 static int arg_is(const char *arg, const char *name) {
@@ -51,14 +52,18 @@ static void print_usage(const char *argv0) {
 
 static const char *find_arg(int argc, char **argv, const char *name, const char *fallback) {
 	for(int i = 1; i + 1 < argc; ++i) {
-		if(arg_is(argv[i], name)) return argv[i + 1];
+		if(arg_is(argv[i], name)) {
+			return argv[i + 1];
+		}
 	}
 	return fallback;
 }
 
 static int has_flag(int argc, char **argv, const char *flag) {
 	for(int i = 1; i < argc; ++i) {
-		if(arg_is(argv[i], flag)) return 1;
+		if(arg_is(argv[i], flag)) {
+			return 1;
+		}
 	}
 	return 0;
 }
@@ -67,11 +72,15 @@ static int parse_i64_arg(const char *text, i64 *value) {
 	char *end = NULL;
 	long long parsed;
 
-	if(!text || !value) return -1;
+	if(!text || !value) {
+		return -1;
+	}
 
 	errno = 0;
 	parsed = strtoll(text, &end, 10);
-	if(errno != 0 || end == text || *end != '\0') return -1;
+	if(errno != 0 || end == text || *end != '\0') {
+		return -1;
+	}
 
 	*value = (i64) parsed;
 	return 0;
@@ -79,197 +88,185 @@ static int parse_i64_arg(const char *text, i64 *value) {
 
 static i64 find_arg_i64(int argc, char **argv, const char *name, i64 fallback) {
 	const char *s = find_arg(argc, argv, name, NULL);
-	if(!s) return fallback;
-	if(parse_i64_arg(s, &fallback) != 0) return fallback;
+	if(!s) {
+		return has_flag(argc, argv, name) ? -1 : fallback;
+	}
+	if(parse_i64_arg(s, &fallback) != 0) {
+		return -1;
+	}
 	return fallback;
 }
-
-// --- Network helpers ---------------------------------------------------------
-
-// Read exactly n bytes from socket (blocking).
-static ssize_t recv_exact(int sock, void *buf, u64 n) {
-	u8 *p = (u8 *) buf;
-	u64 total = 0;
-	while(total < n) {
-		ssize_t r = recv(sock, p + total, n - total, 0);
-		if(r <= 0) return r;
-		total += (u64) r;
-	}
-	return (ssize_t) total;
-}
-
-// --- Main --------------------------------------------------------------------
 
 int rosenet_rx_main(int argc, char **argv) {
 	if(argc > 1 && is_help_arg(argv[1])) {
 		print_usage(argv[0]);
 		return 0;
 	}
-
-	// Named args take priority over positional
 	const char *topic = find_arg(argc, argv, "--topic", NULL);
-	i64 port = find_arg_i64(argc, argv, "--port", -1);
-	int use_udp = has_flag(argc, argv, "--udp");
-	i64 message_size = find_arg_i64(argc, argv, "--message_size", 0);
-	i64 message_rate = find_arg_i64(argc, argv, "--message_rate", 0);
-	if(message_rate <= 0) {
-		// Backward-compatible alias.
-		message_rate = find_arg_i64(argc, argv, "--queue_depth", 0);
-	}
-	char log_msg[256];
-
-	// Fall back to positional: <topic> <port> <msg_size> <slots> [--udp]
-	i64 pos_msg_size = 0;
-	i64 pos_slots = 0;
-	if(!topic && argc >= 2 && !is_option_token(argv[1])) topic = argv[1];
-	if(port < 0 && argc >= 3 && !is_option_token(argv[2])) {
-		if(parse_i64_arg(argv[2], &port) != 0) port = -1;
-	}
-	if(argc >= 4 && !is_option_token(argv[3])) {
-		if(parse_i64_arg(argv[3], &pos_msg_size) != 0) pos_msg_size = 0;
-	}
-	if(argc >= 5 && !is_option_token(argv[4])) {
-		if(parse_i64_arg(argv[4], &pos_slots) != 0) pos_slots = 0;
-	}
-	if(!use_udp && argc > 5 && arg_is(argv[5], "--udp")) use_udp = 1;
-
-	if(!topic || port < 0 || port > UINT16_MAX) {
-		print_usage(argv[0]);
-		return 1;
-	}
-
-	// Compute buffer size and queue depth
-	i64 buf_size;
-	i64 slots;
-
-	if(message_size > 0) {
-		// Benchmark mode: generous formula from benchmark_common.h
-		i64 fixed_bytes = 48; // 6 * sizeof(u64)
-		i64 payload_words = (message_size > fixed_bytes)
-		    ? (message_size - fixed_bytes + 7) / 8
-		    : 0;
-		buf_size = (7 + payload_words) * 16 + 64;
-		if(buf_size < 4 * 1024 * 1024) buf_size = 4 * 1024 * 1024;
-
-		if(message_rate > 0) {
-			slots = message_rate;
-		} else {
-			// Auto-compute: target 512 MB total ring buffer
-			u64 padded = (16 + (u64) buf_size + 63) & ~(u64) 63;
-			slots = (i64) ((512ULL * 1024 * 1024) / padded);
-			if(slots < 2) slots = 2;
-		}
-	} else if(pos_msg_size > 0) {
-		// Positional fallback
-		buf_size = pos_msg_size;
-		slots = pos_slots > 0 ? pos_slots : 1024;
-	} else {
-		buf_size = 65536;
-		slots = 1024;
-	}
-
-	// Init as rose node
-	rose_node *node = rose_init(argc, argv, "rosenet_rx", NULL, NULL);
-
-	// Create publisher with retry
-	rose_publisher *pub = NULL;
-	for(int i = 0; i < 5000 && !pub; ++i) {
-		pub = rose_create_pub(node, (char *) topic, -1, (u64) buf_size, (u64) slots);
-		if(!pub) rose_sleep(1e-3);
-	}
-	if(!pub) {
-		fprintf(stderr, "rosenet_rx: failed to create topic %s\n", topic);
-		return 1;
-	}
-
-	// Setup network socket
-	int sock = socket(AF_INET, use_udp ? SOCK_DGRAM : SOCK_STREAM, 0);
-	if(sock < 0) {
-		perror("socket");
-		return 1;
-	}
-
-	int opt = 1;
-	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-	struct sockaddr_in addr = {0};
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons((u16) port);
-	addr.sin_addr.s_addr = INADDR_ANY;
-
-	if(bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
-		perror("bind");
-		if(close(sock) != 0) {}
-		return 1;
-	}
-
-	int client = sock;
-	if(!use_udp) {
-		listen(sock, 1);
-		(void) snprintf(log_msg, sizeof(log_msg), "Waiting for TCP on port %lld...", (long long) port);
-		(void) rose_info(log_msg, -1);
-		client = accept(sock, NULL, NULL);
-		if(client < 0) {
-			perror("accept");
-			if(close(sock) != 0) {}
+	i64 port = find_arg_i64(argc, argv, "--port", 0);
+	i64 size = find_arg_i64(argc, argv, "--message_size", 65536);
+	i64 slots = find_arg_i64(argc, argv, "--message_rate", find_arg_i64(argc, argv, "--queue_depth", 64));
+	int udp = has_flag(argc, argv, "--udp");
+	if(!topic && argc >= 2 && !is_option_token(argv[1])) {
+		topic = argv[1];
+		if(argc < 5 || parse_i64_arg(argv[2], &port) || parse_i64_arg(argv[3], &size) || parse_i64_arg(argv[4], &slots)) {
+			print_usage(argv[0]);
 			return 1;
 		}
-		int flag = 1;
-		setsockopt(client, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-		if(close(sock) != 0) {}
-		(void) snprintf(log_msg, sizeof(log_msg), "Connected on port %lld", (long long) port);
-		(void) rose_info(log_msg, -1);
-	} else {
-		(void) snprintf(log_msg, sizeof(log_msg), "Listening for UDP on port %lld", (long long) port);
-		(void) rose_info(log_msg, -1);
+		/* Explicit named sizing has priority over positional values. */
+		size = find_arg_i64(argc, argv, "--message_size", size);
+		slots = find_arg_i64(argc, argv, "--message_rate", slots);
+		port = find_arg_i64(argc, argv, "--port", port);
 	}
-
-	// Main loop: try non-blocking recv first, fall back to poll on EAGAIN
-	mirage_msg *msg = mirage_create(buf_size, NULL);
-	u64 count = 0;
-	struct pollfd pfd = {.fd = client, .events = POLLIN};
-
-	while(rose_ok(node)) {
+	if(!topic || port <= 0 || port > UINT16_MAX || size <= 0 || slots <= 0 || !liaison_sizes_valid(size, slots)) {
+		fprintf(stderr, "rosenet_rx: invalid configuration (size 1..16MiB; ring budget 64MiB)\n");
+		return 1;
+	}
+	int status = 1, sock = -1, client = -1;
+	rose_node *node = NULL;
+	mirage_msg *msg = NULL;
+	u64 count = 0, dropped = 0;
+	node = rose_init(argc, argv, "rosenet_rx", NULL, NULL);
+	if(!node) {
+		goto cleanup;
+	}
+	liaison_signals();
+	rose_publisher *pub = rose_create_pub(node, (char *) topic, -1, size, slots);
+	if(!pub) {
+		fprintf(stderr, "rosenet_rx: publisher creation failed\n");
+		goto cleanup;
+	}
+	msg = mirage_create(size, NULL);
+	if(!msg) {
+		fprintf(stderr, "liaison: message allocation failed\n");
+		goto cleanup;
+	}
+	sock = socket(AF_INET, udp ? SOCK_DGRAM : SOCK_STREAM, 0);
+	if(sock < 0) {
+		perror("rosenet_rx: socket");
+		goto cleanup;
+	}
+	int opt = 1;
+	if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+		perror("rosenet_rx: setsockopt");
+		goto cleanup;
+	}
+	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons((u16) port), .sin_addr.s_addr = INADDR_ANY};
+	if(bind(sock, (struct sockaddr *) &addr, sizeof(addr))) {
+		perror("rosenet_rx: bind");
+		goto cleanup;
+	}
+	client = sock;
+	if(!udp) {
+		if(listen(sock, 1)) {
+			perror("rosenet_rx: listen");
+			goto cleanup;
+		}
+		while(liaison_running(node)) {
+			struct pollfd pfd = {.fd = sock, .events = POLLIN};
+			int r = poll(&pfd, 1, 10);
+			if(r < 0 && errno == EINTR) {
+				continue;
+			}
+			if(r < 0 || (r > 0 && !(pfd.revents & POLLIN))) {
+				goto cleanup;
+			}
+			if(!r) {
+				continue;
+			}
+			client = accept(sock, NULL, NULL);
+			if(client < 0 && errno == EINTR) {
+				continue;
+			}
+			if(client < 0) {
+				perror("rosenet_rx: accept");
+				goto cleanup;
+			}
+			break;
+		}
+		if(!liaison_running(node)) {
+			status = 0;
+			goto cleanup;
+		}
+	}
+	status = 0;
+	while(liaison_running(node)) {
+		struct pollfd pfd = {.fd = client, .events = POLLIN};
+		int r = poll(&pfd, 1, 10);
+		if(r < 0 && errno == EINTR) {
+			continue;
+		}
+		if(r < 0 || (r > 0 && !(pfd.revents & POLLIN))) {
+			status = 1;
+			break;
+		}
+		if(!r) {
+			continue;
+		}
 		ssize_t n;
-		if(use_udp) {
-			n = recvfrom(client, msg->data, (size_t) buf_size, MSG_DONTWAIT, NULL, NULL);
+		if(udp) {
+			struct iovec iov = {.iov_base = msg->data, .iov_len = (size_t) size};
+			struct msghdr packet = {.msg_iov = &iov, .msg_iovlen = 1};
+			n = recvmsg(client, &packet, MSG_DONTWAIT);
+			if(n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
+				continue;
+			}
 			if(n < 0) {
-				if(errno != EAGAIN && errno != EWOULDBLOCK) break;
-				if(poll(&pfd, 1, 1) <= 0) continue;
-				if(pfd.revents & (POLLERR | POLLHUP)) break;
+				perror("rosenet_rx: recvmsg");
+				status = 1;
+				break;
+			}
+			if((packet.msg_flags & MSG_TRUNC) || (uint64_t) n > (uint64_t) size || n > LIAISON_UDP_MAX || n == 0) {
+				++dropped;
+				fprintf(stderr, "rosenet_rx: dropped empty/oversized/truncated UDP datagram\n");
 				continue;
 			}
 		} else {
-			// Non-blocking probe for frame header
-			u32 len;
-			ssize_t hr = recv(client, &len, 4, MSG_DONTWAIT);
-			if(hr < 0) {
-				if(errno != EAGAIN && errno != EWOULDBLOCK) break;
-				if(poll(&pfd, 1, 1) <= 0) continue;
-				if(pfd.revents & (POLLERR | POLLHUP)) break;
-				continue;
-			}
-			if(hr == 0) break;
-			// Complete partial header if needed (blocking)
-			if(hr < 4 && recv_exact(client, (u8 *) &len + hr, (u64) (4 - hr)) != (ssize_t) (4 - hr))
+			uint8_t hdr[4];
+			u64 start = rose_now();
+			if(liaison_socket_io(client, hdr, 4, 0, start)) {
+				perror("rosenet_rx: frame header");
+				status = 1;
 				break;
-			if(len == 0 || len > (u32) buf_size) break;
-			// Read payload (blocking — committed once we have the header)
-			n = recv_exact(client, msg->data, len);
-			if(n != (ssize_t) len) break;
-		}
-
-		if(n > 0) {
-			msg->length = n;
-			msg->cursor = n;
-			rose_publish(pub, msg);
-			if(++count % 10000 == 0) {
-				(void) snprintf(log_msg, sizeof(log_msg), "Received %lu messages", (unsigned long) count);
-				(void) rose_info(log_msg, -1);
 			}
+			uint32_t len = (uint32_t) hdr[0] | ((uint32_t) hdr[1] << 8) | ((uint32_t) hdr[2] << 16) | ((uint32_t) hdr[3] << 24);
+			if(!len || len > (uint64_t) size) {
+				fprintf(stderr, "rosenet_rx: invalid TCP frame length\n");
+				status = 1;
+				break;
+			}
+			if(liaison_socket_io(client, msg->data, len, 0, start)) {
+				perror("rosenet_rx: payload");
+				status = 1;
+				break;
+			}
+			n = len;
 		}
+		msg->length = n;
+		msg->cursor = n;
+		if(rose_publish(pub, msg) < 0) {
+			fprintf(stderr, "rosenet_rx: publish failed\n");
+			status = 1;
+			break;
+		}
+		++count;
 	}
-
-	if(close(client) != 0) {}
-	return 0;
+cleanup:
+	if(liaison_stop) {
+		status = 0;
+	}
+	fprintf(stderr, "rosenet_rx: published=%llu dropped=%llu\n", (unsigned long long) count, (unsigned long long) dropped);
+	if(client >= 0 && client != sock) {
+		close(client);
+	}
+	if(sock >= 0) {
+		close(sock);
+	}
+	if(msg) {
+		mirage_destroy(&msg, NULL);
+	}
+	if(node) {
+		rose_shutdown(node);
+	}
+	return status;
 }

@@ -7,10 +7,10 @@
 
 #include <errno.h>
 #include <signal.h>
-#include <stdarg.h>   /* vaargs */
-#include <stdio.h>    /* snprintf */
-#include <stdlib.h>   /* malloc, free */
-#include <string.h>   /* strlen, strcpy, memcpy */
+#include <stdarg.h> /* vaargs */
+#include <stdio.h>  /* snprintf */
+#include <stdlib.h> /* malloc, free */
+#include <string.h> /* strlen, strcpy, memcpy */
 
 #if defined(_WIN32)
 #include "ros3_platform_windows.c"
@@ -19,9 +19,9 @@
 #endif
 
 
-#define REMAP_SIZE 4096			 // at most 4kb of remap strings
-#define REMAP_COUNT 64			 // at most 64 remaps
-#define MAX_PUBSUB 256			 // at most n pubsubs
+#define REMAP_SIZE 4096			   // at most 4kb of remap strings
+#define REMAP_COUNT 64			   // at most 64 remaps
+#define MAX_PUBSUB 256			   // at most n pubsubs
 #define MAX_MESSAGE_SIZE (1920 * 1080 * 3) // max size for a "spin'd" message
 #define ROSE_ERROR_BUFFER_SIZE 1024
 #define ROSE_LOG_MESSAGE_SIZE 512
@@ -133,35 +133,123 @@ static int rose_has_double_slash(const char *value, size_t value_length) {
 	return 0;
 }
 
+// Validate exact byte spans before indexing or passing them to string APIs.
+static int rose_validate_name_span(const char *name, size_t length, int allow_path) {
+	if(!name || length == 0 || length > 255) {
+		return 0;
+	}
+	for(size_t i = 0; i < length; ++i) {
+		unsigned char c = (unsigned char) name[i];
+		if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		   || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.') {
+			continue;
+		}
+		if(allow_path && c == '/' && (i == 0 || name[i - 1] != '/')) {
+			continue;
+		}
+		return 0;
+	}
+	return 1;
+}
+
+static i64 rose_namespace_base(char *base, size_t capacity, size_t *length) {
+	const char *value = getenv("ROSE_BASE");
+	if(!value) {
+		value = "rose";
+	}
+	size_t len = strlen(value);
+	if(len && value[0] == '/') {
+		value++;
+		len--;
+	}
+	if(len && value[len - 1] == '/') {
+		len--;
+	}
+	// Keep the accepted base valid for every global internal channel.
+	const char *suffixes[] = {"rosecore", "roselog", "param_query",
+				  ROSE_TOPIC_REQUEST, ROSE_TOPIC_DUMP, ROSE_TOPIC_LOOKUP, ROSE_TOPIC_HEARTBEAT};
+	size_t longest = 0;
+	for(size_t i = 0; i < sizeof(suffixes) / sizeof(*suffixes); ++i) {
+		size_t suffix_length = strlen(suffixes[i]);
+		if(suffix_length > longest) {
+			longest = suffix_length;
+		}
+	}
+	if(!rose_validate_name_span(value, len, 0)
+	   || len > 255 - 2 - longest
+	   || capacity < 3 || len > capacity - 3) {
+		rose_record_error(ROSE_ERR_BADINPUT,
+				  "ROSE_BASE must be a non-empty namespace token that fits internal shared-memory names.");
+		return ROSE_ERR_BADINPUT;
+	}
+	base[0] = '/';
+	memcpy(base + 1, value, len);
+	base[len + 1] = '/';
+	base[len + 2] = '\0';
+	*length = len + 2;
+	return ROSE_OK;
+}
+
+static char *rose_topic_to_shm_span(char *shm, size_t capacity,
+				    const char *topic, size_t length) {
+	if(!shm || !capacity || !rose_validate_name_span(topic, length, 1)
+	   || topic[length - 1] == '/') {
+		rose_record_error(ROSE_ERR_BADINPUT, "Invalid topic name or output buffer.");
+		return NULL;
+	}
+	char base[256];
+	size_t base_length;
+	if(rose_namespace_base(base, sizeof(base), &base_length) < 0) {
+		return NULL;
+	}
+	if(topic[0] == '/') {
+		topic++;
+		length--;
+	}
+	if(length > 255 - base_length || base_length + length >= capacity) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Resolved topic exceeds shared-memory name or output capacity.");
+		return NULL;
+	}
+	memcpy(shm, base, base_length);
+	memcpy(shm + base_length, topic, length);
+	shm[base_length + length] = '\0';
+	for(size_t i = 1; i < base_length + length; ++i) {
+		if(shm[i] == '/') {
+			shm[i] = '%';
+		}
+	}
+	return shm;
+}
+
 static const char *rose_connect_suggestion(i64 rc, int is_create) {
 	if(rc == -ENOENT) {
 		return is_create
-			       ? "Start `rosecore`, confirm `ROSE_BASE` matches across processes, and retry after the shared-memory namespace exists."
-			       : "Create the publisher first, then verify the topic spelling, node prefix, and `ROSE_BASE` match the publisher.";
+				? "Start `rosecore`, confirm `ROSE_BASE` matches across processes, and retry after the shared-memory namespace exists."
+				: "Create the publisher first, then verify the topic spelling, node prefix, and `ROSE_BASE` match the publisher.";
 	}
 	if(rc == -EINVAL) {
 		return is_create
-			       ? "Use a topic name under 256 bytes and pass positive `message_length` and `message_hz` values."
-			       : "Verify the resolved topic name is under 256 bytes and points at the intended shared-memory object.";
+				? "Use a topic name under 256 bytes and pass positive `message_length` and `message_hz` values."
+				: "Verify the resolved topic name is under 256 bytes and points at the intended shared-memory object.";
 	}
 	if(rc == -ENOMEM || rc == -EOVERFLOW) {
 		return "Lower `message_length` or `message_hz`, and check available shared-memory capacity such as `/dev/shm`.";
 	}
 	if(rc == -EBADMSG) {
 		return is_create
-			       ? "Clear the stale topic with `rosetopic rm <topic_name>`, then recreate it with the new message size/rate. Another process may have created an incompatible quicksand ring buffer."
-			       : "Delete and recreate the topic. Another process may have created an incompatible quicksand ring buffer.";
+				? "Clear the stale topic with `rosetopic rm <topic_name>`, then recreate it with the new message size/rate. Another process may have created an incompatible quicksand ring buffer."
+				: "Delete and recreate the topic. Another process may have created an incompatible quicksand ring buffer.";
 	}
 	return is_create
-		       ? "Check that `rosecore` or peer processes are running, that `ROSE_BASE` and prefixes match, and that the requested buffer sizing is intentional."
-		       : "Check that the publisher is alive and that both processes resolve the same shared-memory topic name.";
+			? "Check that `rosecore` or peer processes are running, that `ROSE_BASE` and prefixes match, and that the requested buffer sizing is intentional."
+			: "Check that the publisher is alive and that both processes resolve the same shared-memory topic name.";
 }
 
 static const char *rose_connect_meaning(i64 rc, int is_create) {
 	if(rc == -ENOENT) {
 		return is_create
-			       ? "the backing shared-memory namespace could not be opened yet"
-			       : "the topic does not exist yet, so there is no shared-memory buffer to attach to";
+				? "the backing shared-memory namespace could not be opened yet"
+				: "the topic does not exist yet, so there is no shared-memory buffer to attach to";
 	}
 	if(rc == -EINVAL) {
 		return "the topic name or requested sizing is invalid for quicksand";
@@ -179,8 +267,8 @@ static const char *rose_connect_meaning(i64 rc, int is_create) {
 		return "quicksand could not inspect the shared-memory object after opening it";
 	}
 	return is_create
-		       ? "quicksand could not create or attach to the requested shared-memory buffer"
-		       : "quicksand could not attach to the requested shared-memory buffer";
+			? "quicksand could not create or attach to the requested shared-memory buffer"
+			: "quicksand could not attach to the requested shared-memory buffer";
 }
 
 static const char *rose_write_suggestion(i64 rc) {
@@ -244,6 +332,7 @@ static const char *rose_read_meaning(i64 rc) {
 static i64 rose_ensure_msg_capacity(mirage_msg **msg,
 				    i64 min_capacity,
 				    void *(*alloc)(size_t),
+				    void (*dealloc)(void *),
 				    const char *api,
 				    const char *purpose) {
 	if(min_capacity <= 0) {
@@ -253,12 +342,8 @@ static i64 rose_ensure_msg_capacity(mirage_msg **msg,
 		return ROSE_OK;
 	}
 
-	if(*msg) {
-		mirage_destroy(msg, 0);
-	}
-
-	*msg = mirage_create(min_capacity, alloc);
-	if(!*msg) {
+	mirage_msg *replacement = mirage_create(min_capacity, alloc);
+	if(!replacement) {
 		rose_record_error(ROSE_ERR_BUFFERSIZE,
 				  "%s failed to allocate a %s buffer of %lld bytes. Suggestion: lower the requested payload size or check allocator/system memory limits.",
 				  api,
@@ -266,6 +351,8 @@ static i64 rose_ensure_msg_capacity(mirage_msg **msg,
 				  (long long) min_capacity);
 		return ROSE_ERR_BUFFERSIZE;
 	}
+	mirage_destroy(msg, dealloc);
+	*msg = replacement;
 
 	return ROSE_OK;
 }
@@ -331,6 +418,41 @@ static i64 rose_validate_message_for_read(const char *api, mirage_msg *msg) {
 	return ROSE_OK;
 }
 
+/* Resolve once, without remapping, so sources and destinations use the same
+ * namespace and remaps cannot recurse or depend on their ordering. */
+static i64 rose_qualify_topic(rose_node *n, const char *name, size_t length,
+			      char *topic, size_t capacity) {
+	if(!rose_validate_name_span(name, length, 1) || name[length - 1] == '/') {
+		rose_record_error(ROSE_ERR_BADINPUT, "Invalid topic name: use nonempty slash-separated ASCII letters, digits, '_', '-', or '.'.");
+		return ROSE_ERR_BADINPUT;
+	}
+	size_t prefix_length = (size_t) n->prefix_length;
+	if(name[0] == '/') {
+		// The first encoded separator ends the base captured at construction.
+		// Never consult the mutable process environment for node-owned names.
+		const char *separator = strchr(n->prefix, '%');
+		if(!separator) {
+			return ROSE_ERR_BADINPUT;
+		}
+		prefix_length = (size_t) (separator - n->prefix) + 1;
+		++name;
+		--length;
+	}
+	if(prefix_length + length > 255 || prefix_length + length >= capacity) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Resolved topic exceeds the 255-byte shared-memory name limit.");
+		return ROSE_ERR_BADINPUT;
+	}
+	memcpy(topic, n->prefix, prefix_length);
+	memcpy(topic + prefix_length, name, length);
+	topic[prefix_length + length] = '\0';
+	for(size_t i = prefix_length; i < prefix_length + length; ++i) {
+		if(topic[i] == '/') {
+			topic[i] = '%';
+		}
+	}
+	return ROSE_OK;
+}
+
 static i64 rose_resolve_topic_name(rose_node *n,
 				   const char *api,
 				   char *name,
@@ -376,55 +498,49 @@ static i64 rose_resolve_topic_name(rose_node *n,
 				  api);
 		return ROSE_ERR_BADINPUT;
 	}
-	if(rose_has_double_slash(name, nlen)) {
+	if(!rose_validate_name_span(name, nlen, 1) || name[nlen - 1] == '/') {
 		rose_record_error(ROSE_ERR_BADINPUT,
-				  "%s received the topic \"%.*s\", which contains `//`. Suggestion: remove empty path segments, for example use `\"camera/image\"` instead of `\"camera//image\"`.",
-				  api,
-				  (int) nlen,
-				  name);
+				  "%s received an invalid topic byte span. Use nonempty slash-separated ASCII letters, digits, '_', '-', or '.', without a trailing slash, within 255 bytes.",
+				  api);
 		return ROSE_ERR_BADINPUT;
 	}
 
-	int written = 0;
-	if(name[0] == '/') {
-		if(!rose_topic_to_shm(topic, topic_size, name)) {
-			return rose_last_error_code();
+	i64 status = rose_qualify_topic(n, name, nlen, topic, topic_size);
+	if(status != ROSE_OK) {
+		return status;
+	}
+	char original[256];
+	memcpy(original, topic, strlen(topic) + 1);
+	const char *selected = NULL;
+	size_t selected_length = 0;
+	const char *rule = n->remaps;
+	for(u64 i = 0; i < n->remap_count; ++i) {
+		size_t from_length = (size_t) n->remap_strlens[2 * i];
+		size_t to_length = (size_t) n->remap_strlens[2 * i + 1];
+		const char *destination = rule + from_length + 1;
+		char source[256];
+		status = rose_qualify_topic(n, rule, from_length, source, sizeof(source));
+		if(status != ROSE_OK) {
+			return status;
 		}
-		written = (int) strlen(topic);
-	} else {
-		written = snprintf(topic, topic_size, "%s%.*s", n->prefix, (int) nlen, name);
-	}
-	if(written < 0 || (size_t) written >= topic_size) {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "%s could not resolve topic \"%.*s\" because the fully-qualified name exceeds %zu bytes. Suggestion: shorten the node prefix, topic, or `ROSE_BASE` value.",
-				  api,
-				  (int) nlen,
-				  name,
-				  topic_size - 1);
-		return ROSE_ERR_BADINPUT;
-	}
-	if(written > 255) {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "%s resolved topic \"%s\" to %d bytes, but quicksand only accepts topic names up to 255 bytes. Suggestion: shorten the namespace, topic, or `ROSE_BASE` value.",
-				  api,
-				  topic,
-				  written);
-		return ROSE_ERR_BADINPUT;
-	}
-
-	for(size_t i = 1; i < (size_t) written; i += 1) {
-		if(topic[i] == '/') {
-			topic[i] = '%';
+		if(strcmp(original, source) == 0) {
+			selected = destination;
+			selected_length = to_length;
 		}
+		rule = destination + to_length + 1;
 	}
-
-	return ROSE_OK;
+	return selected ? rose_qualify_topic(n, selected, selected_length, topic, topic_size)
+			: ROSE_OK;
 }
 
 static void rose_destroy_node_storage(rose_node *n) {
 	if(!n) {
 		return;
 	}
+	mirage_destroy(&n->registration_scratch, n->deallocator);
+	mirage_destroy(&n->callback_scratch, n->deallocator);
+	mirage_destroy(&n->param_request_scratch, n->deallocator);
+	mirage_destroy(&n->param_wrapper_scratch, n->deallocator);
 	if(n->remap_strlens) {
 		rose_free(n, n->remap_strlens);
 		n->remap_strlens = NULL;
@@ -496,22 +612,26 @@ static i64 rose_connect_with_retry(rose_node *n,
 // msg_type: ROSE_MSG_NODE_START, ROSE_MSG_PUB_REGISTER, ROSE_MSG_SUB_REGISTER, ROSE_MSG_HEARTBEAT
 // For NodeStart/Heartbeat: arg2 is NULL, pid is sent as i64
 // For PubRegister/SubRegister: arg2 is the topic name
-static void _rose_send_registration(rose_node *n, char *msg_type,
-				    char *arg2, i64 arg2_len) {
+static i64 _rose_send_registration(rose_node *n, char *msg_type,
+				   char *arg2, i64 arg2_len) {
 	if(!n || !n->rosecore_pub.pub) {
-		return;
+		rose_record_error(ROSE_ERR_BADINPUT,
+				  "Registration requires a connected rosecore publisher.");
+		return ROSE_ERR_BADINPUT;
 	}
 
-	static _Thread_local mirage_msg *m = NULL;
 	i64 required = 128 + (i64) strlen(msg_type) + (i64) n->name_length;
 	if(arg2 && arg2_len > 0) {
 		required += arg2_len;
 	}
-	if(rose_ensure_msg_capacity(&m, required, NULL,
-				    "_rose_send_registration",
-				    "registration") < 0) {
-		return;
+	i64 capacity_status = rose_ensure_msg_capacity(&n->registration_scratch, required,
+						       n->allocator, n->deallocator,
+						       "_rose_send_registration",
+						       "registration");
+	if(capacity_status < 0) {
+		return capacity_status;
 	}
+	mirage_msg *m = n->registration_scratch;
 
 	int64_t err = 0;
 	err |= mirage_write_start(m);
@@ -545,13 +665,16 @@ static void _rose_send_registration(rose_node *n, char *msg_type,
 					  rose_write_meaning(rc),
 					  msg_type,
 					  rose_write_suggestion(rc));
+			return rc;
 		}
 	} else {
 		rose_record_error(ROSE_ERR_BADINPUT,
 				  "_rose_send_registration could not encode the %s message for node \"%s\". Suggestion: shorten node/topic names or inspect the Mirage payload builder for malformed input.",
 				  msg_type,
 				  n->name);
+		return ROSE_ERR_BADINPUT;
 	}
+	return ROSE_OK;
 }
 
 // Send rate-limited heartbeat (max 1kHz)
@@ -607,30 +730,18 @@ static void rose_quicksand_disconnect(rose_node *node,
 	quicksand_disconnect(connection, NULL);
 }
 
-// Advance a subscriber to the latest slot to avoid stale reads on startup.
+// Discard all messages committed before this startup snapshot. Quicksand's
+// index is the next unread position after the latest committed message.
+// Advancing directly avoids allocating/copying a payload just to discard it.
 static void rose_subscriber_sync_latest(rose_subscriber *sub) {
 	if(!sub || !sub->sub || !sub->sub->buffer) {
 		return;
 	}
 
 	quicksand_connection *conn = sub->sub;
-	u64 buffer_size = conn->buffer->message_size;
-	if(buffer_size == 0) {
-		conn->read_index = conn->buffer->index;
-		conn->read_stamp = quicksand_now();
-		return;
-	}
-
-	u8 *scratch = rose_alloc(sub->node, (size_t) buffer_size);
-	if(!scratch) {
-		conn->read_index = conn->buffer->index;
-		conn->read_stamp = quicksand_now();
-		return;
-	}
-
-	i64 sz = (i64) buffer_size;
-	quicksand_read_latest(conn, scratch, &sz);
-	rose_free(sub->node, scratch);
+	conn->read_index = atomic_load_explicit(&conn->buffer->index,
+						memory_order_acquire);
+	conn->read_stamp = quicksand_now();
 }
 
 void _rose_shutdown(void) {
@@ -647,9 +758,17 @@ int rose_set_pdeathsig(int sig) {
 	return rose_platform_set_parent_death_signal(sig);
 }
 
-rose_node *rose_init(char argc, char **argv, char *name_in,
+rose_node *rose_init(int argc, char **argv, char *name_in,
 		     void *(*alloc)(size_t), void (*dealloc)(void *)) {
 	rose_clear_error();
+	if((alloc == NULL) != (dealloc == NULL)) {
+		rose_record_error(ROSE_ERR_BADINPUT, "rose_init requires matching allocator and deallocator hooks.");
+		return NULL;
+	}
+	if(argc < 0 || (argc > 0 && !argv)) {
+		rose_record_error(ROSE_ERR_BADINPUT, "rose_init requires nonnegative argc and argv when argc is positive.");
+		return NULL;
+	}
 
 	void *(*allocate)(size_t) = malloc;
 	if(alloc) {
@@ -702,6 +821,12 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 	// string parsing is so much fun
 	for(int i = 1; i < argc; ++i) {
 		const char *arg = argv[i];
+		if(!arg) {
+			deallocate(remaps);
+			deallocate(remap_lens);
+			rose_record_error(ROSE_ERR_BADINPUT, "rose_init received a NULL argument.");
+			return NULL;
+		}
 		size_t arglen = strlen(arg);
 		if(arglen >= sizeof(prefix) - 2) {
 			deallocate(remaps);
@@ -740,15 +865,8 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 
 		// special __ns or __name remap
 		if(strncmp(arg, "__ns:=", strlen("__ns:=")) == 0) {
-			if(arg[arglen - 1] == '/') { // strip terminating '/'
-				arglen -= 1;
-			}
-			if(arglen && remap[0] == '/') { // strip leading '/'
-				arglen -= 1;
-				remap += 1;
-			}
-			int nslen = (int) arglen - (int) strlen("__ns:=");
-			if(nslen <= 0) {
+			size_t nslen = strlen(remap);
+			if(!rose_validate_name_span(remap, nslen, 1)) {
 				deallocate(remaps);
 				deallocate(remap_lens);
 				rose_record_error(ROSE_ERR_BADINPUT,
@@ -756,18 +874,24 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 						  arg);
 				return NULL;
 			}
-			snprintf(prefix + 1, nslen + 2, "%s/", remap);
+			if(remap[0] == '/') {
+				++remap;
+				--nslen;
+			}
+			if(nslen && remap[nslen - 1] == '/') {
+				--nslen;
+			}
+			prefix[0] = '/';
+			memcpy(prefix + 1, remap, nslen);
+			if(nslen) {
+				prefix[++nslen] = '/';
+			}
+			prefix[nslen + 1] = '\0';
 			continue;
 		}
 
 		if(strncmp(arg, "__name:=", strlen("__name:=")) == 0) {
-			if(arg[arglen - 1] == '/') { // strip terminating '/'
-				arglen -= 1;
-			}
-			if(arglen && remap[0] == '/') { // stkip starting '/'
-				remap += 1;
-			}
-			if(*remap == '\0') {
+			if(!rose_validate_name_span(remap, strlen(remap), 0)) {
 				deallocate(remaps);
 				deallocate(remap_lens);
 				rose_record_error(ROSE_ERR_BADINPUT,
@@ -775,7 +899,7 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 						  arg);
 				return NULL;
 			}
-			snprintf(name, arglen - (remap - arg) + 1, "%s", remap);
+			snprintf(name, sizeof(name), "%s", remap);
 			continue;
 		}
 
@@ -789,6 +913,14 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 		}
 
 		// else this is a normal remap  local/name:=/global/name
+		size_t from_length = (size_t) (remap - 2 - arg);
+		size_t to_length = strlen(remap);
+		if(!rose_validate_name_span(arg, from_length, 1) || !rose_validate_name_span(remap, to_length, 1) || arg[from_length - 1] == '/' || remap[to_length - 1] == '/') {
+			deallocate(remaps);
+			deallocate(remap_lens);
+			rose_record_error(ROSE_ERR_BADINPUT, "rose_init received an invalid topic remap name.");
+			return NULL;
+		}
 		if(remap_count >= REMAP_COUNT) {
 			deallocate(remaps);
 			deallocate(remap_lens);
@@ -799,13 +931,10 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 		}
 
 		int local_len = (int) ((remap - 2) - arg);
-		snprintf(remap_head, local_len + 1, "%s", arg);
-		remap_head += local_len + 1;
-		remap_lens[remap_count * 2] = local_len;
-
 		int global_len = (int) (arglen - (size_t) (remap - arg));
 		size_t used = (size_t) (remap_head - remaps);
-		if(used + (size_t) global_len + 1 >= REMAP_SIZE) {
+		size_t required = (size_t) local_len + (size_t) global_len + 2;
+		if(required > REMAP_SIZE - used) {
 			deallocate(remaps);
 			deallocate(remap_lens);
 			rose_record_error(ROSE_ERR_BADINPUT,
@@ -813,7 +942,12 @@ rose_node *rose_init(char argc, char **argv, char *name_in,
 					  arg);
 			return NULL;
 		}
-		snprintf(remap_head, global_len + 1, "%s", remap);
+		memcpy(remap_head, arg, (size_t) local_len);
+		remap_head[local_len] = '\0';
+		remap_head += local_len + 1;
+		remap_lens[remap_count * 2] = (u64) local_len;
+		memcpy(remap_head, remap, (size_t) global_len);
+		remap_head[global_len] = '\0';
 		remap_head += global_len + 1;
 		remap_lens[remap_count * 2 + 1] = global_len;
 
@@ -845,6 +979,24 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 			    char *remaps, u64 *remap_string_lengths, u64 remap_count,
 			    void *(*alloc)(size_t), void (*dealloc)(void *)) {
 	rose_clear_error();
+	if(remap_count > REMAP_COUNT || (remap_count && (!remaps || !remap_string_lengths))) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Invalid remap table: supply at most 64 complete source/destination pairs.");
+		return NULL;
+	}
+	const char *remap_cursor = remaps;
+	for(u64 i = 0; i < remap_count * 2; ++i) {
+		u64 length = remap_string_lengths[i];
+		if(length > 255 || !rose_validate_name_span(remap_cursor, (size_t) length, 1)
+		   || remap_cursor[length - 1] == '/' || remap_cursor[length] != '\0') {
+			rose_record_error(ROSE_ERR_BADINPUT, "Invalid name in remap table.");
+			return NULL;
+		}
+		remap_cursor += length + 1;
+	}
+	if((alloc == NULL) != (dealloc == NULL)) {
+		rose_record_error(ROSE_ERR_BADINPUT, "rose_create_node requires matching allocator and deallocator hooks.");
+		return NULL;
+	}
 
 	void *(*allocate)(size_t) = malloc;
 	if(alloc) {
@@ -873,81 +1025,76 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 		return NULL;
 	}
 
-	// Default ROSE_BASE is /rose/
-	char topic[512] = "/rose/";
-	char *rose_base = getenv("ROSE_BASE");
-	if(rose_base != NULL) {
-		// strip trailing/leading slash
-		size_t blen = strlen(rose_base);
-		if(rose_base[0] == '/') {
-			rose_base += 1;
-			blen -= 1;
-		}
-		if(blen && rose_base[blen - 1] == '/') {
-			blen -= 1;
-		}
-		if(blen == 0) {
-			rose_record_error(ROSE_ERR_BADINPUT,
-					  "rose_create_node found ROSE_BASE=\"%s\", which becomes empty after trimming slashes. Suggestion: unset ROSE_BASE or set it to a simple token like `robot1`.",
-					  getenv("ROSE_BASE"));
-			return NULL;
-		}
-		if(memchr(rose_base, '/', blen) != NULL) {
-			rose_record_error(ROSE_ERR_BADINPUT,
-					  "rose_create_node found ROSE_BASE=\"%s\", but ROSE_BASE must not contain `/`. Suggestion: use `robot1` instead of `/robot/1`.",
-					  getenv("ROSE_BASE"));
-			return NULL;
-		}
-		snprintf(topic, blen + 3, "/%s/", rose_base);
-	}
-
-	if(!in_prefix) { // No prefix, use base.
-		in_prefix = topic;
-		prefix_len = strlen(topic);
-	} else { // Copy provided prefix after base
-
-		// Default to strlen if provided len is -1
-		if(prefix_len == -1) {
-
-			prefix_len = strlen(in_prefix);
-		}
-		if(prefix_len < 0) {
-			rose_record_error(ROSE_ERR_BADINPUT,
-					  "rose_create_node could not resolve the namespace prefix length. Suggestion: pass a valid prefix string or NULL to use the default namespace.");
-			return NULL;
-		}
-
-		// Trim beginning or ending '/'
-		if(in_prefix[0] == '/') {
-			in_prefix += 1;
-			prefix_len -= 1;
-		}
-		if(prefix_len && in_prefix[prefix_len - 1] == '/') {
-			prefix_len -= 1;
-		}
-
-		if(prefix_len > 0) {
-			snprintf(topic + strlen(topic), prefix_len + 2, "%s/", in_prefix);
-		}
-		in_prefix = topic;
-		prefix_len = strlen(topic);
-	}
-
-	// Default to strlen if provided len is -1.
-	if(name_len == -1) {
-		name_len = strlen(in_name);
-	}
-	if(name_len <= 0) {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_create_node received an empty node name. Suggestion: pass a non-empty name such as `\"mapper\"`.");
+	char topic[512];
+	size_t base_length;
+	if(rose_namespace_base(topic, sizeof(topic), &base_length) < 0) {
 		return NULL;
 	}
-	if(name_len >= 255) {
+	if(in_prefix) {
+		if(prefix_len == -1) {
+			prefix_len = (i64) strlen(in_prefix);
+		}
+		if(prefix_len > 255 || (prefix_len > 0 && !rose_validate_name_span(in_prefix, (size_t) prefix_len, 1))) {
+			rose_record_error(ROSE_ERR_BADINPUT, "Invalid namespace prefix byte span.");
+			return NULL;
+		}
+		if(prefix_len > 0 && in_prefix[0] == '/') {
+			in_prefix++;
+			prefix_len--;
+		}
+		if(prefix_len > 0 && in_prefix[prefix_len - 1] == '/') {
+			prefix_len--;
+		}
+		if(prefix_len > 0) {
+			if((size_t) prefix_len > 255 - base_length - 1) {
+				rose_record_error(ROSE_ERR_BADINPUT, "Namespace prefix exceeds shared-memory name capacity.");
+				return NULL;
+			}
+			memcpy(topic + base_length, in_prefix, (size_t) prefix_len);
+			topic[base_length + (size_t) prefix_len] = '/';
+			topic[base_length + (size_t) prefix_len + 1] = '\0';
+		}
+	}
+	in_prefix = topic;
+	prefix_len = (i64) strlen(topic);
+	size_t namespace_length = (size_t) prefix_len - base_length;
+	for(i64 i = 1; i < prefix_len; ++i) {
+		if(topic[i] == '/') {
+			topic[i] = '%';
+		}
+	}
+	// Reject the entire invalid configuration, including unused or shadowed
+	// rules, before allocations, transport attachment or ownership transfer.
+	rose_node resolver = {.prefix = topic, .prefix_length = (u64) prefix_len};
+	remap_cursor = remaps;
+	for(u64 i = 0; i < remap_count * 2; ++i) {
+		char resolved[256];
+		size_t length = (size_t) remap_string_lengths[i];
+		if(rose_qualify_topic(&resolver, remap_cursor, length, resolved, sizeof(resolved)) < 0) {
+			return NULL;
+		}
+		remap_cursor += length + 1;
+	}
+
+	if(name_len == -1) {
+		name_len = (i64) strlen(in_name);
+	}
+	if(name_len <= 0 || name_len > 255
+	   || !rose_validate_name_span(in_name, (size_t) name_len, 0)) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Invalid node name byte span.");
+		return NULL;
+	}
+	char pid_suffix[32];
+	int pid_length = snprintf(pid_suffix, sizeof(pid_suffix), "-%lld",
+				  (long long) rose_platform_getpid());
+	// The longest private channel is <prefix><name>-<pid>%control.
+	if(pid_length <= 0 || (size_t) pid_length >= sizeof(pid_suffix)
+	   || (size_t) name_len + (size_t) pid_length > 255
+	   || (size_t) prefix_len + (size_t) name_len + (size_t) pid_length
+					   + strlen("%control")
+			   > 255) {
 		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_create_node received node name \"%.*s\" (%lld bytes), but names must stay below 255 bytes before the PID suffix is appended. Suggestion: shorten the node name.",
-				  (int) name_len,
-				  in_name,
-				  (long long) name_len);
+				  "Node namespace and PID-suffixed name exceed internal shared-memory name capacity.");
 		return NULL;
 	}
 
@@ -957,7 +1104,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 				  "rose_create_node could not allocate the rose_node structure. Suggestion: check your allocator or retry with more process memory available.");
 		return NULL;
 	}
-	memset(n, 0, sizeof(rose_node));  // Zero out to ensure all pointers are NULL
+	memset(n, 0, sizeof(rose_node)); // Zero out to ensure all pointers are NULL
 	n->allocator = allocate;
 	n->deallocator = deallocate;
 
@@ -970,17 +1117,24 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 		rose_destroy_node_storage(n);
 		return NULL;
 	}
-	char *name = rose_alloc(n, name_len + 64);
+	size_t identity_length = namespace_length + (size_t) name_len + (size_t) pid_length;
+	char *name = rose_alloc(n, identity_length + 1);
 	if(!name) {
-		long long name_bytes = (long long) name_len + 64LL;
+		long long name_bytes = (long long) identity_length + 1;
 		rose_record_error(ROSE_ERR_BUFFERSIZE,
 				  "rose_create_node could not allocate %lld bytes for the node name. Suggestion: check the allocator passed into ROS3 or retry with more memory available.",
 				  name_bytes);
 		rose_destroy_node_storage(n);
 		return NULL;
 	}
-	memcpy(name, in_name, (size_t) name_len);
-	sprintf(name + name_len, "-%d", (int) rose_platform_getpid());
+	// Registry/display identity excludes ROSE_BASE (each base has its own core)
+	// but includes the namespace so same-process names cannot alias across it.
+	for(size_t i = 0; i < namespace_length; ++i) {
+		char c = topic[base_length + i];
+		name[i] = c == '%' ? '/' : c;
+	}
+	memcpy(name + namespace_length, in_name, (size_t) name_len);
+	memcpy(name + namespace_length + (size_t) name_len, pid_suffix, (size_t) pid_length + 1);
 	n->name = name;
 	n->name_length = strlen(name);
 
@@ -1003,10 +1157,6 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	n->prefix = prefix;
 	n->prefix_length = prefix_len;
 
-
-	n->remaps = remaps;
-	n->remap_strlens = remap_string_lengths;
-	n->remap_count = remap_count;
 
 	n->pubs = allocate(sizeof(rose_publisher) * MAX_PUBSUB);
 	if(!n->pubs) {
@@ -1042,7 +1192,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	memcpy(topic, prefix, base_prefix_len); // base_prefix
 
 	sprintf(topic + base_prefix_len, "%s", "rosecore");
-	rose_connect_with_retry(n, &n->rosecore_pub.pub, topic, 512, 8192, "rosecore publisher");
+	rose_connect_with_retry(n, &n->rosecore_pub.pub, topic, ROSE_REGISTRATION_MSG_SIZE, 8192, "rosecore publisher");
 	n->rosecore_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
@@ -1055,27 +1205,40 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 
 	// full prefix
 	memcpy(topic, prefix, prefix_len + 1);
-	snprintf(topic + prefix_len, n->name_length + 2, "%s%%", n->name);
-	sprintf(topic + base_prefix_len + n->name_length + 1, "%s", "params");
+	size_t leaf_length = n->name_length - namespace_length;
+	snprintf(topic + prefix_len, leaf_length + 2, "%s%%", n->name + namespace_length);
+	sprintf(topic + prefix_len + leaf_length + 1, "%s", "params");
 	rose_connect_with_retry(n, &n->param_sub.sub, topic, 1024, 1024, "parameter reply subscriber");
 	n->param_sub.node = n;
 	n->param_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->param_sub);
 
-	sprintf(topic + base_prefix_len + n->name_length + 1, "%s", "control");
+	sprintf(topic + prefix_len + leaf_length + 1, "%s", "control");
 	rose_connect_with_retry(n, &n->control_sub.sub, topic, 1024, 1024, "control subscriber");
 	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->control_sub);
 
-	ROSE_STATIC_NODE = n;
-
 	// Initialize heartbeat timestamp
 	n->last_heartbeat_ns = 0;
 
 	// Send NodeStart registration to rosecore
-	_rose_send_registration(n, ROSE_MSG_NODE_START, NULL, 0);
+	if(_rose_send_registration(n, ROSE_MSG_NODE_START, NULL, 0) != ROSE_OK) {
+		// Connections can attach existing channels: rollback must not unlink them.
+		rose_quicksand_disconnect(n, &n->rosecore_pub.pub);
+		rose_quicksand_disconnect(n, &n->param_pub.pub);
+		rose_quicksand_disconnect(n, &n->log_pub.pub);
+		rose_quicksand_disconnect(n, &n->param_sub.sub);
+		rose_quicksand_disconnect(n, &n->control_sub.sub);
+		rose_destroy_node_storage(n);
+		return NULL;
+	}
 
+	// Caller retains remaps on every failed construction, including registration.
+	n->remaps = remaps;
+	n->remap_strlens = remap_string_lengths;
+	n->remap_count = remap_count;
+	ROSE_STATIC_NODE = n;
 	rose_clear_error();
 	return n;
 }
@@ -1092,6 +1255,10 @@ i64 rose_ok(rose_node *n) {
 
 void rose_shutdown(rose_node *n) {
 	if(!n) {
+		return;
+	}
+	if(n->spin_active) {
+		n->shutdown_requested = 1;
 		return;
 	}
 
@@ -1137,8 +1304,7 @@ rose_publisher *rose_create_pub(rose_node *n,
 	}
 	if(message_length == 0 || message_hz == 0) {
 		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_create_pub cannot create topic \"%s\" with message_length=%llu and message_hz=%llu. Suggestion: pass both values as positive integers, for example `message_length=4096, message_hz=100`.",
-				  name ? name : "(null)",
+				  "rose_create_pub cannot create a topic with message_length=%llu and message_hz=%llu. Suggestion: pass both values as positive integers, for example `message_length=4096, message_hz=100`.",
 				  (unsigned long long) message_length,
 				  (unsigned long long) message_hz);
 		return NULL;
@@ -1146,7 +1312,8 @@ rose_publisher *rose_create_pub(rose_node *n,
 
 	char topic[512];
 	if(rose_resolve_topic_name(n, "rose_create_pub", name, name_length,
-				   topic, sizeof(topic)) < 0) {
+				   topic, sizeof(topic))
+	   < 0) {
 		return NULL;
 	}
 	if(n->pubs_length >= MAX_PUBSUB) {
@@ -1185,10 +1352,12 @@ rose_publisher *rose_create_pub(rose_node *n,
 		return NULL;
 	}
 
+	if(_rose_send_registration(n, ROSE_MSG_PUB_REGISTER, topic, strlen(topic)) != ROSE_OK) {
+		rose_quicksand_disconnect(n, &pub->pub);
+		memset(pub, 0, sizeof(*pub));
+		return NULL;
+	}
 	n->pubs_length += 1;
-
-	// Send PubRegister to rosecore
-	_rose_send_registration(n, ROSE_MSG_PUB_REGISTER, topic, strlen(topic));
 
 	rose_clear_error();
 	return pub;
@@ -1202,7 +1371,8 @@ rose_subscriber *rose_create_sub(rose_node *n,
 
 	char topic[512];
 	if(rose_resolve_topic_name(n, "rose_create_sub", name, name_length,
-				   topic, sizeof(topic)) < 0) {
+				   topic, sizeof(topic))
+	   < 0) {
 		return NULL;
 	}
 
@@ -1232,11 +1402,11 @@ rose_subscriber *rose_create_sub(rose_node *n,
 		rose_format_errno_code(ret, code_buf, sizeof(code_buf));
 		if(ret == -ENOENT) {
 			rose_record_error_silent(ret,
-					 "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
-					 topic,
-					 code_buf,
-					 rose_connect_meaning(ret, 0),
-					 rose_connect_suggestion(ret, 0));
+						 "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
+						 topic,
+						 code_buf,
+						 rose_connect_meaning(ret, 0),
+						 rose_connect_suggestion(ret, 0));
 		} else {
 			rose_record_error(ret,
 					  "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
@@ -1251,10 +1421,12 @@ rose_subscriber *rose_create_sub(rose_node *n,
 
 	rose_subscriber_sync_latest(sub);
 
+	if(_rose_send_registration(n, ROSE_MSG_SUB_REGISTER, topic, strlen(topic)) != ROSE_OK) {
+		rose_quicksand_disconnect(n, &sub->sub);
+		memset(sub, 0, sizeof(*sub));
+		return NULL;
+	}
 	n->subs_length += 1;
-
-	// Send SubRegister to rosecore
-	_rose_send_registration(n, ROSE_MSG_SUB_REGISTER, topic, strlen(topic));
 
 	rose_clear_error();
 	return sub;
@@ -1427,21 +1599,34 @@ u64 rose_remaining(rose_subscriber *s) {
 }
 
 
-// NOT THREAD SAFE - only call this from one thread at a time.
-void rose_spin_once(rose_node *n) {
+// The outer public spin call owns node lifetime, including between iterations.
+// External serialization is required; this guard only handles same-thread
+// reentrancy and is deliberately not a substitute for synchronization.
+static int rose_begin_spin(rose_node *n) {
 	if(!n) {
 		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_spin_once received a NULL node pointer. Suggestion: keep the `rose_node*` returned by `rose_init(...)` and only spin after successful initialization.");
+				  "Cannot spin a NULL node pointer.");
+		return 0;
+	}
+	if(n->spin_active) {
+		rose_record_error(ROSE_ERR_BADINPUT,
+				  "Recursive spinning of the same node is not supported.");
+		return 0;
+	}
+	n->spin_active = 1;
+	return 1;
+}
+
+static void rose_dispatch_once(rose_node *n) {
+	if(rose_ensure_msg_capacity(&n->callback_scratch, MAX_MESSAGE_SIZE,
+				    n->allocator, n->deallocator,
+				    "rose_spin_once", "callback scratch")
+	   < 0) {
 		return;
 	}
+	mirage_msg *m = n->callback_scratch;
 
-	static _Thread_local mirage_msg *m = NULL;
-	if(rose_ensure_msg_capacity(&m, MAX_MESSAGE_SIZE, n->allocator,
-				    "rose_spin_once", "callback scratch") < 0) {
-		return;
-	}
-
-	for(size_t i = 0; i < n->subs_length; ++i) {
+	for(size_t i = 0; !n->shutdown_requested && i < n->subs_length; ++i) {
 		rose_subscriber *sub = n->subs + i;
 		if(!sub->callback) {
 			continue;
@@ -1472,17 +1657,33 @@ void rose_spin_once(rose_node *n) {
 	}
 }
 
-// NOT THREAD SAFE - only call this from one thread at a time.
-void rose_spin_forever(rose_node *node) {
-	if(!node) {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_spin_forever received a NULL node pointer. Suggestion: only spin after `rose_init(...)` or `rose_create_node(...)` succeeds.");
+static void rose_end_spin(rose_node *n) {
+	n->spin_active = 0;
+	if(n->shutdown_requested) {
+		rose_shutdown(n);
+	}
+}
+
+void rose_spin_once(rose_node *n) {
+	if(!rose_begin_spin(n)) {
 		return;
 	}
-	while(1) {
-		rose_spin_once(node);
+	rose_dispatch_once(n);
+	rose_end_spin(n);
+}
+
+void rose_spin_forever(rose_node *node) {
+	if(!rose_begin_spin(node)) {
+		return;
+	}
+	while(!node->shutdown_requested) {
+		rose_dispatch_once(node);
+		if(node->shutdown_requested) {
+			break;
+		}
 		rose_sleep(1e-3);
 	}
+	rose_end_spin(node);
 }
 
 // -------------------------- Logging ------------------------------------------
@@ -1522,7 +1723,8 @@ static i64 rose_log_truncate_to_fit(mirage_msg *m,
 				    const char *message,
 				    i64 message_length) {
 	if(rose_log_write_msg(m, level, node_name, node_name_length,
-			      message, message_length) == ROSE_OK) {
+			      message, message_length)
+	   == ROSE_OK) {
 		return message_length;
 	}
 
@@ -1531,7 +1733,8 @@ static i64 rose_log_truncate_to_fit(mirage_msg *m,
 	while(lo < hi) {
 		i64 mid = lo + (hi - lo + 1) / 2;
 		if(rose_log_write_msg(m, level, node_name, node_name_length,
-				      message, mid) == ROSE_OK) {
+				      message, mid)
+		   == ROSE_OK) {
 			lo = mid;
 		} else {
 			hi = mid - 1;
@@ -1661,18 +1864,25 @@ i64 rose_get_param(rose_node *n,
 		return ROSE_ERR_BADINPUT;
 	}
 
-	static _Thread_local mirage_msg *req = NULL;
-
 	/* ---------- 1.  Build the node identifier string ---------- */
 	char node_id[512];
-	snprintf(node_id, sizeof(node_id), "%s%s", n->prefix, n->name);
+	const char *leaf = strrchr(n->name, '/');
+	snprintf(node_id, sizeof(node_id), "%s%s", n->prefix, leaf ? leaf + 1 : n->name);
 
 	/* ---------- 2.  Build the request Mirage message ---------- */
-	i64 req_capacity = 128 + param_name_length + (i64) strlen(node_id);
-	if(rose_ensure_msg_capacity(&req, req_capacity, n->allocator,
-				    "rose_get_param", "parameter request") < 0) {
+	i64 node_id_length = (i64) strlen(node_id);
+	if(param_name_length > INT64_MAX - 128 - node_id_length) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Parameter request capacity exceeds the supported size.");
+		return ROSE_ERR_BADINPUT;
+	}
+	i64 req_capacity = 128 + param_name_length + node_id_length;
+	if(rose_ensure_msg_capacity(&n->param_request_scratch, req_capacity,
+				    n->allocator, n->deallocator,
+				    "rose_get_param", "parameter request")
+	   < 0) {
 		return ROSE_ERR_BUFFERSIZE;
 	}
+	mirage_msg *req = n->param_request_scratch;
 
 
 	int64_t err = 0;
@@ -1682,7 +1892,6 @@ i64 rose_get_param(rose_node *n,
 	err |= mirage_write_string(req, node_id, (int64_t) strlen(node_id));
 
 	if(err < 0) {
-		mirage_destroy(&req, 0);
 		rose_record_error(ROSE_ERR_BADINPUT,
 				  "rose_get_param could not encode request for parameter \"%.*s\". Suggestion: shorten the parameter name or inspect the caller for malformed Mirage state.",
 				  (int) param_name_length,
@@ -1692,7 +1901,6 @@ i64 rose_get_param(rose_node *n,
 
 	/* ---------- 3.  Send the request ---------- */
 	int64_t rc = quicksand_write(n->param_pub.pub, req->data, (int64_t) req->cursor);
-	mirage_destroy(&req, 0);
 	if(rc != 0) {
 		char code_buf[128];
 		rose_format_errno_code(rc, code_buf, sizeof(code_buf));
@@ -1772,13 +1980,20 @@ i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
 		return ROSE_ERR_BADINPUT;
 	}
 
-	/* Static buffer for the wrapped message */
-	static _Thread_local mirage_msg *m = NULL;
+	/* Node-owned buffer for the wrapped message. */
+	if(param_name_length > INT64_MAX - 128
+	   || param->cursor > INT64_MAX - 128 - param_name_length) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Parameter wrapper capacity exceeds the supported size.");
+		return ROSE_ERR_BADINPUT;
+	}
 	i64 required_capacity = 128 + param_name_length + param->cursor;
-	if(rose_ensure_msg_capacity(&m, required_capacity, NULL,
-				    "rose_set_param", "parameter wrapper") < 0) {
+	if(rose_ensure_msg_capacity(&n->param_wrapper_scratch, required_capacity,
+				    n->allocator, n->deallocator,
+				    "rose_set_param", "parameter wrapper")
+	   < 0) {
 		return ROSE_ERR_BUFFERSIZE;
 	}
+	mirage_msg *m = n->param_wrapper_scratch;
 
 	/* Reset the message to start a new packet */
 	if(mirage_write_start(m) < 0) {
@@ -1846,56 +2061,7 @@ i64 rose_set_param(rose_node *n, char *param_name, i64 param_name_length,
 
 char *rose_topic_to_shm(char *shm, size_t shm_size, const char *topic) {
 	rose_clear_error();
-
-	if(!shm || shm_size == 0) {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_topic_to_shm requires a destination buffer and non-zero size. Suggestion: pass a writable char array such as `char buf[512]`.");
-		return NULL;
-	}
-	if(!topic || topic[0] == '\0') {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_topic_to_shm requires a non-empty topic string. Suggestion: pass a topic such as `\"camera/image\"` or `\"/robot/cmd_vel\"`.");
-		return NULL;
-	}
-
-	// Build base from ROSE_BASE env var (default: "/rose/")
-	char base[512] = "/rose/";
-	char *rose_base = getenv("ROSE_BASE");
-	if(rose_base != NULL) {
-		size_t blen = strlen(rose_base);
-		if(rose_base[0] == '/') {
-			rose_base += 1;
-			blen -= 1;
-		}
-		if(blen && rose_base[blen - 1] == '/') {
-			blen -= 1;
-		}
-		snprintf(base, blen + 3, "/%.*s/", (int) blen, rose_base);
-	}
-
-	// Skip leading / on topic if present
-	if(topic[0] == '/') {
-		topic++;
-	}
-
-	// Build full path: /<ROSE_BASE>/<topic>
-	int written = snprintf(shm, shm_size, "%s%s", base, topic);
-	if(written < 0 || (size_t) written >= shm_size) {
-		rose_record_error(ROSE_ERR_BADINPUT,
-				  "rose_topic_to_shm could not fit topic \"%s\" into a buffer of %zu bytes. Suggestion: pass a larger output buffer or shorten the topic / ROSE_BASE namespace.",
-				  topic,
-				  shm_size);
-		return NULL;
-	}
-
-	// Convert / to % after first char
-	for(size_t i = 1; shm[i]; i++) {
-		if(shm[i] == '/') {
-			shm[i] = '%';
-		}
-	}
-
-	return shm;
+	return rose_topic_to_shm_span(shm, shm_size, topic, topic ? strlen(topic) : 0);
 }
 
 // ------------------------- Timing Utilities ----------------------------------

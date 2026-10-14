@@ -7,7 +7,7 @@
 #include <mirage.h>
 
 int main(int argc, char **argv) {
-	rose_node *n = rose_init((char)argc, argv, "c_pub", NULL, NULL);
+	rose_node *n = rose_init(argc, argv, "c_pub", NULL, NULL);
 	rose_publisher *p = rose_create_pub(n, "/chatter", -1, 1024, 128);
 	mirage_msg *m = mirage_create(1024, NULL);
 	while (rose_ok(n)) {
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
 #include <stdio.h>
 
 int main(int argc, char **argv) {
-	rose_node *n = rose_init((char)argc, argv, "c_sub", NULL, NULL);
+	rose_node *n = rose_init(argc, argv, "c_sub", NULL, NULL);
 	rose_subscriber *s = rose_create_sub(n, "/chatter", -1, 1, NULL);
 	mirage_msg *m = mirage_create(1024, NULL);
 	char text[256]; i64 len = 0;

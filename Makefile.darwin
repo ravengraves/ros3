@@ -250,7 +250,7 @@ install-docs:
 	mkdir -p $(DOC_INSTALL_DIR)
 	install -m 0644 $(DOC_BUILD_TARGETS) $(DOC_INSTALL_DIR)/
 
-install-lib: $(LIB_TARGETS) $(PC_FILE)
+install-lib: $(LIB_TARGETS) $(PC_FILE) install-embedded
 	mkdir -p $(LIB_INSTALL_DIR) $(INCLUDE_INSTALL_DIR) $(PKGCONFIG_INSTALL_DIR)
 	install -m 0644 $(BUILD_DIR)/libros3.dylib $(BUILD_DIR)/libros3.a $(BUILD_DIR)/libros3_gcc_lto.a $(LIB_INSTALL_DIR)/
 	install -m 0644 $(HEADER) $(INCLUDE_INSTALL_DIR)/ros3.h
@@ -269,7 +269,7 @@ uninstall-docs:
 
 uninstall-lib:
 	rm -f $(LIB_INSTALL_DIR)/libros3.dylib $(LIB_INSTALL_DIR)/libros3.a $(LIB_INSTALL_DIR)/libros3_gcc_lto.a
-	rm -f $(INCLUDE_INSTALL_DIR)/ros3.h
+	rm -f $(INCLUDE_INSTALL_DIR)/ros3.h $(INCLUDE_INSTALL_DIR)/ros3_embedded.h
 	rm -f $(PKGCONFIG_INSTALL_DIR)/ros3.pc
 
 uninstall: uninstall-lib uninstall-bin uninstall-docs
@@ -293,3 +293,5 @@ check-cpp: $(BUILD_DIR)/rosecore $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/te
 	install-bin install-docs install-lib install \
 	uninstall-bin uninstall-docs uninstall-lib uninstall \
 	format python check-python check-cpp
+
+include test/embedded_serial.mk
