@@ -194,6 +194,8 @@ i64 rose_ok(rose_node *n);
 rose_publisher *rose_create_pub(rose_node *n, char *name, i64 name_length,
 				u64 message_length, u64 message_hz);
 
+// Callback subscriptions reject transport slots larger than 6,220,800 bytes
+// (including transport padding). Use explicit reads for larger slots.
 rose_subscriber *rose_create_sub(rose_node *n, char *name, i64 name_length,
 				 u64 latest_only, void (*callback)(mirage_msg *));
 
@@ -216,6 +218,8 @@ u64 rose_remaining(rose_subscriber *s);
 // may be spun recursively, provided their lifetimes are externally serialized.
 void rose_spin_once(rose_node *n);
 
+// Checks rose_ok each iteration for heartbeats/control. A control stop returns
+// without destroying the node; the caller should then call rose_shutdown.
 void rose_spin_forever(rose_node *n);
 
 /// ---------------- Parameters ------------------------------------------------

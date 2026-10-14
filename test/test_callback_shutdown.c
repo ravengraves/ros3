@@ -119,6 +119,50 @@ int main(void) {
 	fail_call = 0;
 	rose_shutdown(active);
 	assert(!live[1] && !connection_count);
+	// Control stops spin before callbacks; the caller still owns the node.
+	active = node_a();
+	assert(active);
+	ready(active, "pending", later_callback);
+	atomic_store(&active->control_sub.sub->buffer->index, 1);
+	active->control_sub.sub->buffer->length = 2;
+	rose_spin_forever(active);
+	assert(!later_count && !active->spin_active && active->last_heartbeat_ns);
+	rose_shutdown(active);
+	assert(!live[1] && !connection_count);
+
+	// Oversized slots fail before registration; manual reads remain allowed.
+	active = node_a();
+	source_slot_size = MAX_MESSAGE_SIZE + 64;
+	int before = connection_count, writes = successful_writes;
+	assert(!rose_create_sub(active, "large", -1, 0, later_callback));
+	assert(rose_last_error_code() == -EMSGSIZE);
+	assert(strstr(rose_last_error(), "max callback size"));
+	assert(connection_count == before && successful_writes == writes && !active->subs_length);
+	assert(rose_create_sub(active, "large", -1, 0, NULL));
+	source_slot_size = MAX_MESSAGE_SIZE;
+	assert(rose_create_sub(active, "boundary", -1, 0, later_callback));
+	source_slot_size = 0;
+	rose_shutdown(active);
+	assert(!live[1] && !connection_count);
+
+	// Permanent errors fail immediately, rolling back earlier connections.
+	connect_calls = 0;
+	connect_fail_after = 2;
+	connect_error = -EACCES;
+	assert(!node_a());
+	assert(connect_calls == 3 && rose_last_error_code() == -EACCES);
+	assert(!live[1] && !connection_count);
+	// Transient errors stop at the deadline and preserve the underlying cause.
+	connect_calls = connect_fail_after = 0;
+	connect_error = -EAGAIN;
+	u64 started = quicksand_now();
+	assert(!node_a());
+	double elapsed = quicksand_ns(quicksand_now(), started) / 1e9;
+	assert(elapsed >= 1.0 && elapsed < 3.0);
+	assert(rose_last_error_code() == -ETIMEDOUT);
+	assert(strstr(rose_last_error(), "deadline reached"));
+	assert(!live[1] && !connection_count);
+	connect_error = 0;
 	puts("callback shutdown tests passed");
 	return 0;
 }

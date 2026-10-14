@@ -12,11 +12,16 @@
 #include <pthread.h>
 
 static int connection_count;
+static int connect_calls, connect_fail_after;
+static i64 connect_error;
+static u64 source_slot_size;
 static i64 write_result;
 static int delete_count, successful_writes;
 
 i64 memory_connect(quicksand_connection **out, char *name, i64 length,
 		   i64 size, i64 rate, void *alloc) {
+	++connect_calls;
+	if(connect_error && connect_calls > connect_fail_after) return connect_error;
 	(void) size;
 	(void) rate;
 	(void) alloc;
@@ -28,6 +33,7 @@ i64 memory_connect(quicksand_connection **out, char *name, i64 length,
 	assert(*out);
 	(*out)->buffer = calloc(1, sizeof(*(*out)->buffer));
 	assert((*out)->buffer);
+	(*out)->buffer->message_size = source_slot_size;
 	memcpy((*out)->name, name, (size_t) length);
 	++connection_count;
 	return 0;

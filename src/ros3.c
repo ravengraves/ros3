@@ -55,6 +55,9 @@ static void rose_clear_error(void) {
 static const char *rose_errno_name(int err) {
 	switch(err) {
 	case EINVAL: return "EINVAL";
+	case EACCES: return "EACCES";
+	case EAGAIN: return "EAGAIN";
+	case EINTR: return "EINTR";
 	case ENOENT: return "ENOENT";
 	case ENOMEM: return "ENOMEM";
 	case EMSGSIZE: return "EMSGSIZE";
@@ -575,35 +578,25 @@ static i64 rose_connect_with_retry(rose_node *n,
 				   i64 message_rate,
 				   const char *channel_name) {
 	u64 attempts = 0;
-	u64 last_report_ns = 0;
-
+	u64 start = quicksand_now();
 	for(;;) {
-		i64 rc = rose_quicksand_connect(n, connection, topic, -1,
-						message_size, message_rate);
-		if(rc == 0) {
-			return 0;
+		i64 rc = rose_quicksand_connect(n, connection, topic, -1, message_size, message_rate);
+		if(rc == 0) return 0;
+		++attempts;
+		double elapsed_ms = quicksand_ns(quicksand_now(), start) / 1e6;
+		int transient = rc == -EINTR || rc == -EAGAIN || rc == -ENOENT;
+		int expired = elapsed_ms >= 1000.0;
+		if(attempts == 1 || !transient || expired) {
+			char code[128];
+			rose_format_errno_code(rc, code, sizeof(code));
+			rose_record_error(expired && transient ? -ETIMEDOUT : rc,
+				"rose_create_node: %s connecting %s topic \"%s\" after %llu attempts (%.1f ms, deadline 1000 ms): %s (%s); slot=%lld bytes, count=%lld. %s",
+				expired ? "deadline reached" : transient ? "retrying" : "failed",
+				channel_name, topic, (unsigned long long) attempts, elapsed_ms,
+				code, rose_connect_meaning(rc, 1), (long long) message_size,
+				(long long) message_rate, rose_connect_suggestion(rc, 1));
 		}
-
-		attempts += 1;
-		u64 now = quicksand_now();
-		if(attempts <= 3
-		   || last_report_ns == 0
-		   || quicksand_ns(now, last_report_ns) >= 1e9) {
-			char code_buf[128];
-			rose_format_errno_code(rc, code_buf, sizeof(code_buf));
-			rose_record_error(rc,
-					  "rose_create_node could not connect internal topic \"%s\" for %s: quicksand_connect returned %s, which means %s, while creating a buffer with size %lld bytes and rate %lld Hz (attempt %llu). Suggestion: %s",
-					  topic,
-					  channel_name,
-					  code_buf,
-					  rose_connect_meaning(rc, 1),
-					  (long long) message_size,
-					  (long long) message_rate,
-					  (unsigned long long) attempts,
-					  rose_connect_suggestion(rc, 1));
-			last_report_ns = now;
-		}
-
+		if(!transient || expired) return expired && transient ? -ETIMEDOUT : rc;
 		rose_sleep(1e-3);
 	}
 }
@@ -1188,19 +1181,19 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 		}
 	}
 
-	// map connections (retry with 1ms sleep until connected)
+	// Connect internal channels; transient failures have a one-second deadline.
 	memcpy(topic, prefix, base_prefix_len); // base_prefix
 
 	sprintf(topic + base_prefix_len, "%s", "rosecore");
-	rose_connect_with_retry(n, &n->rosecore_pub.pub, topic, ROSE_REGISTRATION_MSG_SIZE, 8192, "rosecore publisher");
+	if(rose_connect_with_retry(n, &n->rosecore_pub.pub, topic, ROSE_REGISTRATION_MSG_SIZE, 8192, "rosecore publisher") != 0) goto connection_failed;
 	n->rosecore_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
-	rose_connect_with_retry(n, &n->log_pub.pub, topic, ROSE_LOG_MESSAGE_SIZE, 8192, "roselog publisher");
+	if(rose_connect_with_retry(n, &n->log_pub.pub, topic, ROSE_LOG_MESSAGE_SIZE, 8192, "roselog publisher") != 0) goto connection_failed;
 	n->log_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "param_query");
-	rose_connect_with_retry(n, &n->param_pub.pub, topic, 512, 8192, "parameter query publisher");
+	if(rose_connect_with_retry(n, &n->param_pub.pub, topic, 512, 8192, "parameter query publisher") != 0) goto connection_failed;
 	n->param_pub.node = n;
 
 	// full prefix
@@ -1208,13 +1201,13 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	size_t leaf_length = n->name_length - namespace_length;
 	snprintf(topic + prefix_len, leaf_length + 2, "%s%%", n->name + namespace_length);
 	sprintf(topic + prefix_len + leaf_length + 1, "%s", "params");
-	rose_connect_with_retry(n, &n->param_sub.sub, topic, 1024, 1024, "parameter reply subscriber");
+	if(rose_connect_with_retry(n, &n->param_sub.sub, topic, 1024, 1024, "parameter reply subscriber") != 0) goto connection_failed;
 	n->param_sub.node = n;
 	n->param_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->param_sub);
 
 	sprintf(topic + prefix_len + leaf_length + 1, "%s", "control");
-	rose_connect_with_retry(n, &n->control_sub.sub, topic, 1024, 1024, "control subscriber");
+	if(rose_connect_with_retry(n, &n->control_sub.sub, topic, 1024, 1024, "control subscriber") != 0) goto connection_failed;
 	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->control_sub);
@@ -1224,14 +1217,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 
 	// Send NodeStart registration to rosecore
 	if(_rose_send_registration(n, ROSE_MSG_NODE_START, NULL, 0) != ROSE_OK) {
-		// Connections can attach existing channels: rollback must not unlink them.
-		rose_quicksand_disconnect(n, &n->rosecore_pub.pub);
-		rose_quicksand_disconnect(n, &n->param_pub.pub);
-		rose_quicksand_disconnect(n, &n->log_pub.pub);
-		rose_quicksand_disconnect(n, &n->param_sub.sub);
-		rose_quicksand_disconnect(n, &n->control_sub.sub);
-		rose_destroy_node_storage(n);
-		return NULL;
+		goto connection_failed;
 	}
 
 	// Caller retains remaps on every failed construction, including registration.
@@ -1241,6 +1227,16 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	ROSE_STATIC_NODE = n;
 	rose_clear_error();
 	return n;
+
+connection_failed:
+	// Attached channels may belong to another process: never unlink on failure.
+	rose_quicksand_disconnect(n, &n->rosecore_pub.pub);
+	rose_quicksand_disconnect(n, &n->param_pub.pub);
+	rose_quicksand_disconnect(n, &n->log_pub.pub);
+	rose_quicksand_disconnect(n, &n->param_sub.sub);
+	rose_quicksand_disconnect(n, &n->control_sub.sub);
+	rose_destroy_node_storage(n);
+	return NULL;
 }
 
 i64 rose_ok(rose_node *n) {
@@ -1416,6 +1412,15 @@ rose_subscriber *rose_create_sub(rose_node *n,
 					  rose_connect_suggestion(ret, 0));
 		}
 		sub->sub = NULL;
+		return NULL;
+	}
+
+	if(callback && sub->sub->buffer->message_size > MAX_MESSAGE_SIZE) {
+		rose_record_error(-EMSGSIZE,
+			"rose_create_sub: topic \"%s\" has a %llu-byte slot, exceeding the max callback size of %d bytes (including slot padding). Use a smaller publisher slot or explicit rose_read with a sufficiently large buffer.",
+			topic, (unsigned long long) sub->sub->buffer->message_size, MAX_MESSAGE_SIZE);
+		rose_quicksand_disconnect(n, &sub->sub);
+		memset(sub, 0, sizeof(*sub));
 		return NULL;
 	}
 
@@ -1676,7 +1681,7 @@ void rose_spin_forever(rose_node *node) {
 	if(!rose_begin_spin(node)) {
 		return;
 	}
-	while(!node->shutdown_requested) {
+	while(!node->shutdown_requested && rose_ok(node)) {
 		rose_dispatch_once(node);
 		if(node->shutdown_requested) {
 			break;
