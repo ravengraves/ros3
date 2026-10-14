@@ -8,7 +8,7 @@ static void cb(mirage_msg *msg) {
 	f64 val;
 
 	int ret = mirage_read_start(msg);
-	ret |= mirage_read_fn(msg, 0, &fn_len, 0, &fn_argc);
+	ret |= mirage_read_fn(msg, 0, &fn_len, MIRAGE_SKIP_COPY, &fn_argc);
 	ret |= mirage_read_string(msg, str, &str_len, sizeof(str) - 1);
 	ret |= mirage_read_f64(msg, &val);
 

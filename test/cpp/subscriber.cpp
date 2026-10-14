@@ -26,7 +26,7 @@ bool decode_payload(mirage_msg *msg, std::string &label_out, int64_t &value_out)
 	int ret = 0;
 
 	ret |= mirage_read_start(msg);
-	ret |= mirage_read_fn(msg, nullptr, &fn_len, 0, &fn_argc);
+	ret |= mirage_read_fn(msg, nullptr, &fn_len, MIRAGE_SKIP_COPY, &fn_argc);
 	ret |= mirage_read_string(msg, label, &label_len, (int64_t) sizeof(label) - 1);
 	ret |= mirage_read_i64(msg, &value_out);
 
