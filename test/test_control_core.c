@@ -1,6 +1,6 @@
 #define quicksand_write capture_write
 #include "../cmd/common/query.h"
-#include "../cmd/rosecore/core.c"
+#include "../cmd/rosecore/main.c"
 #undef quicksand_write
 #include <assert.h>
 #include <sys/wait.h>

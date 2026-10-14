@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#include "../cmd/roseserial/core.c"
+#include "../cmd/roseserial/main.c"
 #include <assert.h>
 #include <pthread.h>
 #include <signal.h>

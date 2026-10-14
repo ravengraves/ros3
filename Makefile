@@ -66,12 +66,12 @@ TEST_TARGETS := \
 ALL_EXECUTABLES := $(BIN_TARGETS) $(TEST_TARGETS)
 ANALYZE_C_SOURCES := \
 	src/ros3.c \
-	cmd/rosecore/main+posix.c cmd/rosecore/core.c \
-	cmd/rosenode/main+posix.c cmd/rosenode/core.c \
-	cmd/rosetopic/main+posix.c cmd/rosetopic/core.c \
-	cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c \
-	cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c \
-	cmd/roseserial/main+posix.c cmd/roseserial/core.c \
+	cmd/rosecore/main+posix.c cmd/rosecore/main.c \
+	cmd/rosenode/main+posix.c cmd/rosenode/main.c \
+	cmd/rosetopic/main+posix.c cmd/rosetopic/main.c \
+	cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/main.c \
+	cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/main.c \
+	cmd/roseserial/main+posix.c cmd/roseserial/main.c \
 	cmd/test/main.c \
 	cmd/test_net_pub/main.c \
 	cmd/test_net_sub/main.c
@@ -154,23 +154,23 @@ $(BUILD_DIR)/ros3_gcc_lto.o: $(SOURCE)
 $(BUILD_DIR)/test: cmd/test/main.c $(BUILD_DIR)/libros3.a
 	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosecore: cmd/rosecore/main+posix.c cmd/rosecore/core.c cmd/rosecore/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosecore/main+posix.c cmd/rosecore/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+$(BUILD_DIR)/rosecore: cmd/rosecore/main+posix.c cmd/rosecore/main.c cmd/rosecore/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosecore/main+posix.c cmd/rosecore/main.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosenode: cmd/rosenode/main+posix.c cmd/rosenode/core.c cmd/rosenode/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenode/main+posix.c cmd/rosenode/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+$(BUILD_DIR)/rosenode: cmd/rosenode/main+posix.c cmd/rosenode/main.c cmd/rosenode/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenode/main+posix.c cmd/rosenode/main.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosetopic: cmd/rosetopic/main+posix.c cmd/rosetopic/core.c cmd/rosetopic/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosetopic/main+posix.c cmd/rosetopic/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS) $(ROSETOPIC_LIBS)
+$(BUILD_DIR)/rosetopic: cmd/rosetopic/main+posix.c cmd/rosetopic/main.c cmd/rosetopic/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosetopic/main+posix.c cmd/rosetopic/main.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS) $(ROSETOPIC_LIBS)
 
-$(BUILD_DIR)/rosenet_tx: cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c cmd/rosenet_tx/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+$(BUILD_DIR)/rosenet_tx: cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/main.c cmd/rosenet_tx/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/main.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/rosenet_rx: cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c cmd/rosenet_rx/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+$(BUILD_DIR)/rosenet_rx: cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/main.c cmd/rosenet_rx/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/main.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/roseserial: cmd/roseserial/main+posix.c cmd/roseserial/core.c cmd/roseserial/core.h $(BUILD_DIR)/libros3.a
-	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/roseserial/main+posix.c cmd/roseserial/core.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
+$(BUILD_DIR)/roseserial: cmd/roseserial/main+posix.c cmd/roseserial/main.c cmd/roseserial/core.h $(BUILD_DIR)/libros3.a
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ cmd/roseserial/main+posix.c cmd/roseserial/main.c $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/test_net_pub: cmd/test_net_pub/main.c $(BUILD_DIR)/libros3.a
 	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
@@ -324,10 +324,10 @@ check-cpp: $(BUILD_DIR)/rosecore $(BUILD_DIR)/test_cpp_publisher $(BUILD_DIR)/te
 	format python check-python check-cpp
 
 # Focused regression coverage for control PID handling and registry bounds.
-$(BUILD_DIR)/test_control_node: test/test_control_node.c cmd/rosenode/core.c cmd/common/process.h $(HEADER) $(BUILD_DIR)/libros3.a
+$(BUILD_DIR)/test_control_node: test/test_control_node.c cmd/rosenode/main.c cmd/common/process.h $(HEADER) $(BUILD_DIR)/libros3.a
 	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
-$(BUILD_DIR)/test_control_core: test/test_control_core.c cmd/rosecore/core.c cmd/common/process.h $(HEADER) $(BUILD_DIR)/libros3.a
+$(BUILD_DIR)/test_control_core: test/test_control_core.c cmd/rosecore/main.c cmd/common/process.h $(HEADER) $(BUILD_DIR)/libros3.a
 	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BIN_TARGETS): $(HEADER)
@@ -399,7 +399,7 @@ check-registration-failures: $(BUILD_DIR)/test_registration_failures
 $(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/rosenet_tx $(BUILD_DIR)/roseserial: cmd/common/liaison.h
 $(BUILD_DIR)/roseserial: cmd/roseserial/frame.h
 
-$(BUILD_DIR)/test_liaison_io: test/test_liaison_io.c cmd/roseserial/core.c cmd/roseserial/frame.h cmd/common/liaison.h $(HEADER) $(BUILD_DIR)/libros3.a
+$(BUILD_DIR)/test_liaison_io: test/test_liaison_io.c cmd/roseserial/main.c cmd/roseserial/frame.h cmd/common/liaison.h $(HEADER) $(BUILD_DIR)/libros3.a
 	$(CC) $(CFLAGS_LTO) $(CEXE) -pthread -o $@ $< $(BUILD_DIR)/libros3.a $(DEP_STATIC_LIBS)
 
 $(BUILD_DIR)/test_liaison_fixture: test/test_liaison_fixture.c $(HEADER) $(BUILD_DIR)/libros3.a

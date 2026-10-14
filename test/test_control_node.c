@@ -1,6 +1,6 @@
 // Intercept signaling: malformed responses must never reach the OS.
 #define kill test_kill
-#include "../cmd/rosenode/core.c"
+#include "../cmd/rosenode/main.c"
 #undef kill
 #include <assert.h>
 #include <sys/wait.h>

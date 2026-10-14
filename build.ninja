@@ -90,18 +90,18 @@ build $builddir/libros3.so: link_so $builddir/ros3_so.o
 build $builddir/libros3.a: ar $builddir/ros3_lto.o
 build $builddir/libros3_gcc_lto.a: gcc_ar $builddir/ros3_gcc_lto.o
 
-build $builddir/rosecore: link_c cmd/rosecore/main+posix.c cmd/rosecore/core.c | $builddir/libros3.a
+build $builddir/rosecore: link_c cmd/rosecore/main+posix.c cmd/rosecore/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a
-build $builddir/rosenode: link_c cmd/rosenode/main+posix.c cmd/rosenode/core.c | $builddir/libros3.a
+build $builddir/rosenode: link_c cmd/rosenode/main+posix.c cmd/rosenode/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a
-build $builddir/rosetopic: link_c cmd/rosetopic/main+posix.c cmd/rosetopic/core.c | $builddir/libros3.a
+build $builddir/rosetopic: link_c cmd/rosetopic/main+posix.c cmd/rosetopic/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a
   libs = -lm
-build $builddir/rosenet_tx: link_c cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/core.c | $builddir/libros3.a
+build $builddir/rosenet_tx: link_c cmd/rosenet_tx/main+posix.c cmd/rosenet_tx/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a
-build $builddir/rosenet_rx: link_c cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/core.c | $builddir/libros3.a
+build $builddir/rosenet_rx: link_c cmd/rosenet_rx/main+posix.c cmd/rosenet_rx/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a
-build $builddir/roseserial: link_c cmd/roseserial/main+posix.c cmd/roseserial/core.c | $builddir/libros3.a
+build $builddir/roseserial: link_c cmd/roseserial/main+posix.c cmd/roseserial/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a
 build $builddir/test: link_c cmd/test/main.c | $builddir/libros3.a
   lib = $builddir/libros3.a

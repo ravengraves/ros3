@@ -14,50 +14,50 @@ windows.md
   Missing For Cross-Platform CLI Support
 
   - Process management abstraction.
-      - rosecore uses kill(pid, 0) for liveness checks in cmd/rosecore/core.c (/home/alec/source/rose/ros3/cmd/rosecore/
-        core.c#L158).
-      - rosenode uses kill(pid, SIGINT/SIGKILL) in cmd/rosenode/core.c (/home/alec/source/rose/ros3/cmd/rosenode/
-        core.c#L311).
+      - rosecore uses kill(pid, 0) for liveness checks in cmd/rosecore/main.c (/home/alec/source/rose/ros3/cmd/rosecore/
+        main.c#L158).
+      - rosenode uses kill(pid, SIGINT/SIGKILL) in cmd/rosenode/main.c (/home/alec/source/rose/ros3/cmd/rosenode/
+        main.c#L311).
       - Windows needs an abstraction like rose_platform_process_alive(pid) and probably rose_platform_signal_process(pid,
         mode) or equivalent.
       - SIGKILL has no real Windows equivalent, so rosenode kill -9 needs explicit Windows semantics or should be
         unsupported there.
   - Real shutdown-handler abstraction usage.
       - ros3_platform.h already has rose_platform_install_shutdown_handlers(...), but the CLI tools do not use it.
-      - rosecore and rosetopic install raw signal(SIGINT/SIGTERM, ...) handlers in cmd/rosecore/core.c (/home/alec/source/
-        rose/ros3/cmd/rosecore/core.c#L581), cmd/rosetopic/core.c (/home/alec/source/rose/ros3/cmd/rosetopic/core.c#L499),
-        cmd/rosetopic/core.c (/home/alec/source/rose/ros3/cmd/rosetopic/core.c#L559).
+      - rosecore and rosetopic install raw signal(SIGINT/SIGTERM, ...) handlers in cmd/rosecore/main.c (/home/alec/source/
+        rose/ros3/cmd/rosecore/main.c#L581), cmd/rosetopic/main.c (/home/alec/source/rose/ros3/cmd/rosetopic/main.c#L499),
+        cmd/rosetopic/main.c (/home/alec/source/rose/ros3/cmd/rosetopic/main.c#L559).
       - On Windows, the current platform shim explicitly says CTRL handler wiring is not implemented in src/
         ros3_platform_windows.c (/home/alec/source/rose/ros3/src/ros3_platform_windows.c).
   - PID abstraction usage.
-      - rose_platform_getpid() exists, but rosecore still uses raw getpid() in cmd/rosecore/core.c (/home/alec/source/rose/
-        ros3/cmd/rosecore/core.c#L576).
+      - rose_platform_getpid() exists, but rosecore still uses raw getpid() in cmd/rosecore/main.c (/home/alec/source/rose/
+        ros3/cmd/rosecore/main.c#L576).
       - More CLI code should consistently use the platform helper instead of POSIX getpid().
   - Socket platform layer for the network tools.
       - rosenet_tx and rosenet_rx are still POSIX socket code:
-          - cmd/rosenet_tx/core.c (/home/alec/source/rose/ros3/cmd/rosenet_tx/core.c#L9)
-          - cmd/rosenet_rx/core.c (/home/alec/source/rose/ros3/cmd/rosenet_rx/core.c#L9)
+          - cmd/rosenet_tx/main.c (/home/alec/source/rose/ros3/cmd/rosenet_tx/main.c#L9)
+          - cmd/rosenet_rx/main.c (/home/alec/source/rose/ros3/cmd/rosenet_rx/main.c#L9)
       - Missing Windows support pieces include:
           - Winsock init/cleanup (WSAStartup/WSACleanup)
           - SOCKET vs int
           - closesocket() vs close()
           - errno/WSA error mapping
-          - writev() replacement in cmd/rosenet_tx/core.c (/home/alec/source/rose/ros3/cmd/rosenet_tx/core.c#L101)
-          - poll() replacement or wrapper in cmd/rosenet_rx/core.c (/home/alec/source/rose/ros3/cmd/rosenet_rx/core.c#L234)
-          - SIGPIPE logic in cmd/rosenet_tx/core.c (/home/alec/source/rose/ros3/cmd/rosenet_tx/core.c#L124), which is
+          - writev() replacement in cmd/rosenet_tx/main.c (/home/alec/source/rose/ros3/cmd/rosenet_tx/main.c#L101)
+          - poll() replacement or wrapper in cmd/rosenet_rx/main.c (/home/alec/source/rose/ros3/cmd/rosenet_rx/main.c#L234)
+          - SIGPIPE logic in cmd/rosenet_tx/main.c (/home/alec/source/rose/ros3/cmd/rosenet_tx/main.c#L124), which is
             POSIX-specific
   - Serial port abstraction.
       - roseserial is Linux/Unix-specific right now:
-          - termios.h in cmd/roseserial/core.c (/home/alec/source/rose/ros3/cmd/roseserial/core.c#L18)
-          - poll() in cmd/roseserial/core.c (/home/alec/source/rose/ros3/cmd/roseserial/core.c#L147)
+          - termios.h in cmd/roseserial/main.c (/home/alec/source/rose/ros3/cmd/roseserial/main.c#L18)
+          - poll() in cmd/roseserial/main.c (/home/alec/source/rose/ros3/cmd/roseserial/main.c#L147)
           - Unix device naming assumptions in the shell completion file, e.g. /dev/ttyUSB0
       - Windows needs a COM-port implementation, likely via CreateFile, DCB, COMMTIMEOUTS, ReadFile, WriteFile.
   - POSIX header and macro cleanup.
       - Several tools hardcode POSIX-only compile assumptions:
-          - _POSIX_C_SOURCE in cmd/rosecore/core.c (/home/alec/source/rose/ros3/cmd/rosecore/core.c#L6), cmd/rosenode/
-            core.c (/home/alec/source/rose/ros3/cmd/rosenode/core.c#L10), cmd/rosetopic/core.c (/home/alec/source/rose/
-            ros3/cmd/rosetopic/core.c#L10)
-          - _GNU_SOURCE in cmd/roseserial/core.c (/home/alec/source/rose/ros3/cmd/roseserial/core.c#L6)
+          - _POSIX_C_SOURCE in cmd/rosecore/main.c (/home/alec/source/rose/ros3/cmd/rosecore/main.c#L6), cmd/rosenode/
+            main.c (/home/alec/source/rose/ros3/cmd/rosenode/main.c#L10), cmd/rosetopic/main.c (/home/alec/source/rose/
+            ros3/cmd/rosetopic/main.c#L10)
+          - _GNU_SOURCE in cmd/roseserial/main.c (/home/alec/source/rose/ros3/cmd/roseserial/main.c#L6)
           - unistd.h / sys/types.h includes in several tools
       - Those either need guarding or replacement via platform helpers.
   - Build wiring for real Windows implementations.
