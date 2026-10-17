@@ -82,9 +82,9 @@ rule run
 
 build FORCE: phony
 
-build $builddir/ros3_so.o: cc_so src/ros3.c
-build $builddir/ros3_lto.o: cc_lto src/ros3.c
-build $builddir/ros3_gcc_lto.o: cc_gcc_lto src/ros3.c
+build $builddir/ros3_so.o: cc_so src/ros3.c | include/ros3.h src/ros3_platform.h src/ros3_platform_posix.c src/ros3_platform_windows.c
+build $builddir/ros3_lto.o: cc_lto src/ros3.c | include/ros3.h src/ros3_platform.h src/ros3_platform_posix.c src/ros3_platform_windows.c
+build $builddir/ros3_gcc_lto.o: cc_gcc_lto src/ros3.c | include/ros3.h src/ros3_platform.h src/ros3_platform_posix.c src/ros3_platform_windows.c
 
 build $builddir/libros3.so: link_so $builddir/ros3_so.o
 build $builddir/libros3.a: ar $builddir/ros3_lto.o

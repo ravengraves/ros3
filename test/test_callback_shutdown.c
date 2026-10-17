@@ -126,7 +126,7 @@ int main(void) {
 	atomic_store(&active->control_sub.sub->buffer->index, 1);
 	active->control_sub.sub->buffer->length = 2;
 	rose_spin_forever(active);
-	assert(!later_count && !active->spin_active && active->last_heartbeat_ns);
+	assert(!later_count && !active->spin_active && !active->last_heartbeat_ns);
 	rose_shutdown(active);
 	assert(!live[1] && !connection_count);
 

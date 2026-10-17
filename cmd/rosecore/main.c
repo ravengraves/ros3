@@ -1,12 +1,11 @@
 // rosecore.c - Central registration daemon for ROS3
 //
-// This process must be started before any ROS3 nodes.
-// It creates the rosecore topic and logs all node registrations.
+// Nodes register automatically when this process starts or restarts.
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "core.h"
 #include "../common/process.h"
+#include "core.h"
 #include "ros3.h"
 
 #include <errno.h>
@@ -20,11 +19,9 @@
 #define MAX_NODES ROSE_MAX_NODES
 #define MAX_TOPICS ROSE_MAX_TOPICS
 #define MAX_NAME_LEN ROSE_MAX_NAME_LEN
-#define CORE_HEARTBEAT_MSG_SIZE ((i64) sizeof(i64))
+#define CORE_HEARTBEAT_MSG_SIZE ((i64) sizeof(rose_core_heartbeat))
 #define CORE_HEARTBEAT_RATE 256
 #define CORE_HEARTBEAT_STARTUP_WINDOW_NS 300000000.0
-#define CORE_HEARTBEAT_STARTUP_PUB_NS 10000000.0
-#define CORE_HEARTBEAT_STEADY_PUB_NS 100000000.0
 #define CORE_HEARTBEAT_POLL_SLEEP_NS 1000000ULL
 
 typedef struct {
@@ -74,81 +71,47 @@ static void handle_signal(int sig) {
 	running = 0;
 }
 
-static void unlink_topic_if_present(const char *topic) {
-	if(!topic || !topic[0]) {
-		return;
-	}
-	quicksand_delete((char *) topic, -1);
+static int send_CORE_HEARTBEAT(quicksand_connection *conn, rose_core_heartbeat *heartbeat) {
+	heartbeat->timestamp = quicksand_now();
+	return (int) quicksand_write(conn, (u8 *) heartbeat, CORE_HEARTBEAT_MSG_SIZE);
 }
 
-static void cleanup_core_topics(const char *topic,
-				const char *dump_topic,
-				const char *lookup_topic,
-				const char *heartbeat_topic,
-				const char *request_topic) {
-	unlink_topic_if_present(topic);
-	unlink_topic_if_present(dump_topic);
-	unlink_topic_if_present(lookup_topic);
-	unlink_topic_if_present(heartbeat_topic);
-	unlink_topic_if_present(request_topic);
-}
-
-static int send_CORE_HEARTBEAT(quicksand_connection *conn, i64 self_pid) {
-	if(!conn) {
-		return -EINVAL;
-	}
-	return (int) quicksand_write(conn, (u8 *) &self_pid, CORE_HEARTBEAT_MSG_SIZE);
-}
-
-static int read_CORE_HEARTBEAT(quicksand_connection *conn, i64 *pid) {
-	i64 sz = CORE_HEARTBEAT_MSG_SIZE;
-	i64 read_pid = 0;
-	i64 ret = quicksand_read(conn, (u8 *) &read_pid, &sz);
-	if(ret < 0) {
-		return (int) ret;
-	}
-	if(sz != CORE_HEARTBEAT_MSG_SIZE) {
-		return -EINVAL;
-	}
-	*pid = read_pid;
-	return 0;
-}
-
-static void skip_old_CORE_HEARTBEATs(quicksand_connection *conn) {
-	i64 ignored_pid = 0;
-	i64 sz = CORE_HEARTBEAT_MSG_SIZE;
-	quicksand_read_latest(conn, (u8 *) &ignored_pid, &sz);
-}
-
-static int startup_heartbeat_resolution(quicksand_connection *pub,
-					quicksand_connection *sub,
-					i64 self_pid) {
+static int startup_heartbeat_resolution(quicksand_connection *conn,
+					rose_core_heartbeat *heartbeat) {
 	u64 start = quicksand_now();
-	u64 last_pub = 0;
+	conn->read_index = atomic_load(&conn->buffer->index);
 
-	skip_old_CORE_HEARTBEATs(sub);
-
-	while(quicksand_ns(quicksand_now(), start) < CORE_HEARTBEAT_STARTUP_WINDOW_NS) {
+	while(running && quicksand_ns(quicksand_now(), start) < CORE_HEARTBEAT_STARTUP_WINDOW_NS) {
 		u64 now = quicksand_now();
-		if(last_pub == 0
-		   || quicksand_ns(now, last_pub) >= CORE_HEARTBEAT_STARTUP_PUB_NS) {
-			if(send_CORE_HEARTBEAT(pub, self_pid) < 0) {
+		if(heartbeat->timestamp == 0
+		   || quicksand_ns(now, heartbeat->timestamp) >= ROSE_CORE_INTERVAL_NS) {
+			if(send_CORE_HEARTBEAT(conn, heartbeat) < 0) {
 				fprintf(stderr, "[rosecore] Failed to publish startup heartbeat\n");
 				return -1;
 			}
-			last_pub = now;
 		}
 
-		for(;;) {
-			i64 seen_pid = 0;
-			int ret = read_CORE_HEARTBEAT(sub, &seen_pid);
+		for(int i = 0; i < CORE_HEARTBEAT_RATE; ++i) {
+			rose_core_heartbeat seen;
+			i64 size = sizeof(seen);
+			i64 ret = quicksand_read(conn, (u8 *) &seen, &size);
 			if(ret < 0) {
+				if(ret < -1) {
+					conn->read_index = atomic_load(&conn->buffer->index);
+				}
 				break;
 			}
-			if(seen_pid != self_pid) {
+			if(size != sizeof(seen) || !rose_core_heartbeat_valid(&seen, quicksand_now())) {
+				continue;
+			}
+			if(seen.pid == heartbeat->pid && seen.instance_stamp == heartbeat->instance_stamp) {
+				continue;
+			}
+			// READY takes priority; simultaneous starters prefer the lower PID.
+			if(seen.state == ROSE_CORE_READY || seen.pid < heartbeat->pid) {
 				fprintf(stderr,
 					"[rosecore] Another rosecore is active (pid=%ld)\n",
-					(long) seen_pid);
+					(long) seen.pid);
 				return 1;
 			}
 		}
@@ -156,7 +119,7 @@ static int startup_heartbeat_resolution(quicksand_connection *pub,
 		quicksand_sleep(CORE_HEARTBEAT_POLL_SLEEP_NS);
 	}
 
-	return 0;
+	return running ? 0 : -1;
 }
 
 // Check if a process is still alive using kill(pid, 0)
@@ -617,11 +580,14 @@ int rosecore_main(int argc, char **argv) {
 	quicksand_connection *request_conn = NULL;
 	quicksand_connection *lookup_conn = NULL;
 	quicksand_connection *heartbeat_pub = NULL;
-	quicksand_connection *heartbeat_sub = NULL;
 	mirage_msg *msg = NULL;
 	mirage_msg *query_msg = NULL;
-	int core_claimed = 0;
-	i64 self_pid = (i64) getpid();
+	rose_core_heartbeat heartbeat = {
+			.version = 1,
+			.state = ROSE_CORE_STARTING,
+			.pid = (i64) getpid(),
+			.instance_stamp = quicksand_now(),
+	};
 	int64_t ret = 0;
 
 	(void) rose_set_pdeathsig(SIGTERM);
@@ -639,31 +605,30 @@ int rosecore_main(int argc, char **argv) {
 	}
 	printf("[rosecore] Opening heartbeat topic: %s\n", heartbeat_topic);
 
-	ret = quicksand_connect(&heartbeat_pub, heartbeat_topic, -1,
-				CORE_HEARTBEAT_MSG_SIZE,
-				CORE_HEARTBEAT_RATE, NULL);
+	for(;;) {
+		ret = quicksand_connect(&heartbeat_pub, heartbeat_topic, -1,
+					CORE_HEARTBEAT_MSG_SIZE, CORE_HEARTBEAT_RATE, NULL);
+		// A competing starter may still be initializing the shared header.
+		if(ret != -EINVAL && ret != -EPROTONOSUPPORT) {
+			break;
+		}
+		if(quicksand_ns(quicksand_now(), heartbeat.instance_stamp) >= CORE_HEARTBEAT_STARTUP_WINDOW_NS) {
+			break;
+		}
+		quicksand_sleep(CORE_HEARTBEAT_POLL_SLEEP_NS);
+	}
 	if(ret != 0) {
-		fprintf(stderr, "[rosecore] Failed to create heartbeat topic: %ld\n",
+		fprintf(stderr, "[rosecore] Failed to create/attach heartbeat topic (check existing ring layout): %ld\n",
 			(long) ret);
 		exit_code = 1;
 		goto cleanup;
 	}
 
-	ret = quicksand_connect(&heartbeat_sub, heartbeat_topic, -1, 0, 0, NULL);
-	if(ret != 0) {
-		fprintf(stderr, "[rosecore] Failed to subscribe to heartbeat topic: %ld\n",
-			(long) ret);
-		exit_code = 1;
-		goto cleanup;
-	}
-
-	ret = startup_heartbeat_resolution(heartbeat_pub, heartbeat_sub, self_pid);
+	ret = startup_heartbeat_resolution(heartbeat_pub, &heartbeat);
 	if(ret != 0) {
 		exit_code = 1;
 		goto cleanup;
 	}
-	core_claimed = 1;
-	quicksand_disconnect(&heartbeat_sub, NULL);
 
 	// Build the rosecore topic name: /<ROSE_BASE>/rosecore
 	rose_topic_to_shm(topic, sizeof(topic), "rosecore");
@@ -710,14 +675,6 @@ int rosecore_main(int argc, char **argv) {
 		exit_code = 1;
 		goto cleanup;
 	}
-	// Discard requests from before this daemon instance was ready.
-	request_conn->read_index = atomic_load_explicit(&request_conn->buffer->index,
-							memory_order_acquire);
-	request_conn->read_stamp = quicksand_now();
-
-	printf("[rosecore] Ready. Listening for node registrations...\n");
-	(void) fflush(stdout);
-
 	msg = mirage_create(1024, NULL);
 	if(!msg) {
 		fprintf(stderr, "[rosecore] Failed to allocate message buffer\n");
@@ -735,33 +692,43 @@ int rosecore_main(int argc, char **argv) {
 
 	core_start_time = quicksand_now();
 	u64 last_status_print = core_start_time;
-	u64 last_CORE_HEARTBEAT = core_start_time;
+	// Persistent rings may contain work for the previous core. Start at the tail
+	// before READY so nodes can replay their registrations for this instance.
+	pub->read_index = atomic_load(&pub->buffer->index);
+	request_conn->read_index = atomic_load(&request_conn->buffer->index);
+	pub->read_stamp = request_conn->read_stamp = core_start_time;
+	heartbeat.state = ROSE_CORE_READY;
+	if(send_CORE_HEARTBEAT(heartbeat_pub, &heartbeat) < 0) {
+		fprintf(stderr, "[rosecore] Failed to publish ready heartbeat\n");
+		exit_code = 1;
+		goto cleanup;
+	}
+	printf("[rosecore] Ready. Listening for node registrations...\n");
+	(void) fflush(stdout);
 
 
 	while(running) {
 		u64 now = quicksand_now();
-		if(quicksand_ns(now, last_CORE_HEARTBEAT) >= CORE_HEARTBEAT_STEADY_PUB_NS) {
-			if(send_CORE_HEARTBEAT(heartbeat_pub, self_pid) < 0) {
+		if(quicksand_ns(now, heartbeat.timestamp) >= ROSE_CORE_INTERVAL_NS) {
+			if(send_CORE_HEARTBEAT(heartbeat_pub, &heartbeat) < 0) {
 				fprintf(stderr, "[rosecore] Failed to publish heartbeat\n");
-			} else {
-				last_CORE_HEARTBEAT = now;
 			}
 		}
 
-		// Read all registration messages
-		i64 sz = msg->max_length;
-		i64 r = quicksand_read(pub, msg->data, &sz);
-		while(r >= 0) {
+		// Bound registration traffic so heartbeats and queries keep running.
+		for(int registrations = 0; registrations < 128; ++registrations) {
+			i64 sz = msg->max_length;
+			if(quicksand_read(pub, msg->data, &sz) < 0) {
+				break;
+			}
 			msg->length = sz;
 			process_registration(msg);
-			sz = msg->max_length;
-			r = quicksand_read(pub, msg->data, &sz);
 		}
 
 		// Drain a bounded batch so response traffic cannot delay new requests.
 		for(int requests = 0; requests < ROSE_REQUEST_RING_SIZE; requests++) {
-			sz = query_msg->max_length;
-			r = quicksand_read(request_conn, query_msg->data, &sz);
+			i64 sz = query_msg->max_length;
+			i64 r = quicksand_read(request_conn, query_msg->data, &sz);
 			if(r < 0) {
 				break;
 			}
@@ -790,14 +757,11 @@ cleanup:
 	node_count = 0;
 	mirage_destroy(&query_msg, NULL);
 	mirage_destroy(&msg, NULL);
-	quicksand_disconnect(&heartbeat_sub, NULL);
+	// Leave shared-memory topics in place for surviving nodes and the next core.
 	quicksand_disconnect(&heartbeat_pub, NULL);
 	quicksand_disconnect(&request_conn, NULL);
 	quicksand_disconnect(&lookup_conn, NULL);
 	quicksand_disconnect(&dump_conn, NULL);
 	quicksand_disconnect(&pub, NULL);
-	if(core_claimed) {
-		cleanup_core_topics(topic, dump_topic, lookup_topic, heartbeat_topic, request_topic);
-	}
 	return exit_code;
 }

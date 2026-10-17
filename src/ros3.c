@@ -26,6 +26,16 @@
 #define ROSE_ERROR_BUFFER_SIZE 1024
 #define ROSE_LOG_MESSAGE_SIZE 512
 
+// Keep the public node layout unchanged; this storage has the same lifetime.
+typedef struct {
+	rose_node node;
+	quicksand_connection *core_heartbeat;
+	rose_core_heartbeat core; // Retain identity and replay progress across heartbeat gaps.
+	u64 last_check, last_notice;
+	int registered_node;
+	u64 registered_pubs, registered_subs;
+} rose_node_storage;
+
 static rose_node *ROSE_STATIC_NODE = NULL;
 static _Thread_local char ROSE_LAST_ERROR[ROSE_ERROR_BUFFER_SIZE] = {0};
 static _Thread_local i64 ROSE_LAST_ERROR_CODE = ROSE_OK;
@@ -45,6 +55,13 @@ const char *rose_last_error(void) {
 
 i64 rose_last_error_code(void) {
 	return ROSE_LAST_ERROR_CODE;
+}
+
+int rose_core_heartbeat_valid(const rose_core_heartbeat *h, u64 now) {
+	return h && h->version == 1 && h->pid > 0
+			&& (h->state == ROSE_CORE_STARTING || h->state == ROSE_CORE_READY)
+			&& h->instance_stamp > 0 && h->instance_stamp <= h->timestamp
+			&& h->timestamp <= now && quicksand_ns(now, h->timestamp) <= ROSE_CORE_TIMEOUT_NS;
 }
 
 static void rose_clear_error(void) {
@@ -100,27 +117,10 @@ static void rose_record_errorv(i64 code, const char *fmt, va_list ap) {
 	(void) fflush(stderr);
 }
 
-static void rose_record_error_silentv(i64 code, const char *fmt, va_list ap) {
-	ROSE_LAST_ERROR_CODE = code;
-	if(!fmt) {
-		ROSE_LAST_ERROR[0] = '\0';
-		return;
-	}
-
-	vsnprintf(ROSE_LAST_ERROR, sizeof(ROSE_LAST_ERROR), fmt, ap);
-}
-
 static void rose_record_error(i64 code, const char *fmt, ...) {
 	va_list ap;
 	va_start(ap, fmt);
 	rose_record_errorv(code, fmt, ap);
-	va_end(ap);
-}
-
-static void rose_record_error_silent(i64 code, const char *fmt, ...) {
-	va_list ap;
-	va_start(ap, fmt);
-	rose_record_error_silentv(code, fmt, ap);
 	va_end(ap);
 }
 
@@ -540,6 +540,8 @@ static void rose_destroy_node_storage(rose_node *n) {
 	if(!n) {
 		return;
 	}
+	rose_node_storage *s = (rose_node_storage *) n;
+	rose_quicksand_disconnect(n, &s->core_heartbeat);
 	mirage_destroy(&n->registration_scratch, n->deallocator);
 	mirage_destroy(&n->callback_scratch, n->deallocator);
 	mirage_destroy(&n->param_request_scratch, n->deallocator);
@@ -581,22 +583,29 @@ static i64 rose_connect_with_retry(rose_node *n,
 	u64 start = quicksand_now();
 	for(;;) {
 		i64 rc = rose_quicksand_connect(n, connection, topic, -1, message_size, message_rate);
-		if(rc == 0) return 0;
+		if(rc == 0) {
+			return 0;
+		}
 		++attempts;
 		double elapsed_ms = quicksand_ns(quicksand_now(), start) / 1e6;
-		int transient = rc == -EINTR || rc == -EAGAIN || rc == -ENOENT;
+		// Another creator can expose the segment before its size/header is ready.
+		int transient = rc == -EINTR || rc == -EAGAIN || rc == -ENOENT
+				|| rc == -EINVAL || rc == -EPROTONOSUPPORT;
 		int expired = elapsed_ms >= 1000.0;
 		if(attempts == 1 || !transient || expired) {
 			char code[128];
 			rose_format_errno_code(rc, code, sizeof(code));
 			rose_record_error(expired && transient ? -ETIMEDOUT : rc,
-				"rose_create_node: %s connecting %s topic \"%s\" after %llu attempts (%.1f ms, deadline 1000 ms): %s (%s); slot=%lld bytes, count=%lld. %s",
-				expired ? "deadline reached" : transient ? "retrying" : "failed",
-				channel_name, topic, (unsigned long long) attempts, elapsed_ms,
-				code, rose_connect_meaning(rc, 1), (long long) message_size,
-				(long long) message_rate, rose_connect_suggestion(rc, 1));
+					  "rose_create_node: %s connecting %s topic \"%s\" after %llu attempts (%.1f ms, deadline 1000 ms): %s (%s); slot=%lld bytes, count=%lld. %s",
+					  expired ? "deadline reached" : transient ? "retrying"
+										   : "failed",
+					  channel_name, topic, (unsigned long long) attempts, elapsed_ms,
+					  code, rose_connect_meaning(rc, 1), (long long) message_size,
+					  (long long) message_rate, rose_connect_suggestion(rc, 1));
 		}
-		if(!transient || expired) return expired && transient ? -ETIMEDOUT : rc;
+		if(!transient || expired) {
+			return expired && transient ? -ETIMEDOUT : rc;
+		}
 		rose_sleep(1e-3);
 	}
 }
@@ -626,24 +635,17 @@ static i64 _rose_send_registration(rose_node *n, char *msg_type,
 	}
 	mirage_msg *m = n->registration_scratch;
 
-	int64_t err = 0;
-	err |= mirage_write_start(m);
-
-	if(strcmp(msg_type, ROSE_MSG_NODE_START) == 0) {
-		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 2);
-		err |= mirage_write_string(m, n->name, n->name_length);
-		err |= mirage_write_i64(m, rose_platform_getpid());
-	} else if(strcmp(msg_type, ROSE_MSG_HEARTBEAT) == 0) {
-		i64 now = (i64) quicksand_now();
-		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 3);
-		err |= mirage_write_string(m, n->name, n->name_length);
-		err |= mirage_write_i64(m, rose_platform_getpid());
-		err |= mirage_write_i64(m, now);
-	} else {
-		// PubRegister or SubRegister
-		err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), 2);
-		err |= mirage_write_string(m, n->name, n->name_length);
+	int heartbeat = strcmp(msg_type, ROSE_MSG_HEARTBEAT) == 0;
+	i64 err = mirage_write_start(m);
+	err |= mirage_write_fn(m, msg_type, (i64) strlen(msg_type), heartbeat ? 3 : 2);
+	err |= mirage_write_string(m, n->name, n->name_length);
+	if(arg2) {
 		err |= mirage_write_string(m, arg2, arg2_len);
+	} else {
+		err |= mirage_write_i64(m, rose_platform_getpid());
+		if(heartbeat) {
+			err |= mirage_write_i64(m, (i64) quicksand_now());
+		}
 	}
 
 	if(err >= 0) {
@@ -670,22 +672,80 @@ static i64 _rose_send_registration(rose_node *n, char *msg_type,
 	return ROSE_OK;
 }
 
-// Send rate-limited heartbeat (max 1kHz)
-static void _rose_send_heartbeat(rose_node *n) {
-	if(!n || !n->rosecore_pub.pub) {
+// Replay at most 16 registrations per check, retaining the cursor on failure.
+static void rose_replay_registration(rose_node *n, rose_node_storage *s) {
+	for(int sent = 0; sent < 16; ++sent) {
+		char *type;
+		char *topic = NULL;
+		u64 *progress = NULL;
+		if(!s->registered_node) {
+			// NodeStart must succeed before any endpoints are announced.
+			type = ROSE_MSG_NODE_START;
+		} else if(s->registered_pubs < n->pubs_length) {
+			type = ROSE_MSG_PUB_REGISTER;
+			topic = (char *) n->pubs[s->registered_pubs].pub->name;
+			progress = &s->registered_pubs;
+		} else if(s->registered_subs < n->subs_length) {
+			type = ROSE_MSG_SUB_REGISTER;
+			topic = (char *) n->subs[s->registered_subs].sub->name;
+			progress = &s->registered_subs;
+		} else {
+			break;
+		}
+		if(_rose_send_registration(n, type, topic, topic ? (i64) strlen(topic) : 0) != ROSE_OK) {
+			break;
+		}
+		if(progress) {
+			++*progress;
+		} else {
+			s->registered_node = 1;
+		}
+	}
+}
+
+// One cooperative 10 Hz pass for discovery, registration and node heartbeats.
+static void rose_maintain_discovery(rose_node *n, u64 now) {
+	rose_node_storage *s = (rose_node_storage *) n;
+	if(s->last_check && quicksand_ns(now, s->last_check) < ROSE_CORE_INTERVAL_NS) {
 		return;
 	}
-
-	u64 now = quicksand_now();
-	f64 elapsed = quicksand_ns(now, n->last_heartbeat_ns);
-
-	// Rate limit: 1ms minimum interval (1kHz max)
-	if(n->last_heartbeat_ns != 0 && elapsed < 1e6) {
+	s->last_check = now;
+	char topic[256];
+	snprintf(topic, sizeof(topic), "%s_heartbeat", n->rosecore_pub.pub->name);
+	if(!s->core_heartbeat) {
+		rose_quicksand_connect(n, &s->core_heartbeat, topic, -1, 0, 0);
+	}
+	if(s->core_heartbeat) {
+		rose_core_heartbeat h;
+		i64 size = sizeof(h);
+		i64 rc = quicksand_read_latest(s->core_heartbeat, (u8 *) &h, &size);
+		if(rc >= 0 && size == sizeof(h) && rose_core_heartbeat_valid(&h, now)) {
+			if(h.state == ROSE_CORE_READY) {
+				if(h.pid != s->core.pid || h.instance_stamp != s->core.instance_stamp) {
+					s->registered_node = 0;
+					s->registered_pubs = s->registered_subs = 0;
+				}
+				s->core = h;
+			} else {
+				s->core.timestamp = 0; // Suspend sending without losing the last READY identity.
+			}
+		} else if(rc < -1) {
+			// Do not get stuck retrying an oversized/malformed record.
+			s->core_heartbeat->read_index = atomic_load(&s->core_heartbeat->buffer->index);
+		}
+	}
+	if(!rose_core_heartbeat_valid(&s->core, now)) {
+		if(quicksand_ns(now, s->last_notice) >= ROSE_CORE_TIMEOUT_NS) {
+			fprintf(stderr, "[ros3] Node '%s': has not received rosecore heartbeat on %s; node continues running.\n", n->name, topic);
+			s->last_notice = now;
+		}
 		return;
 	}
-
-	_rose_send_registration(n, ROSE_MSG_HEARTBEAT, NULL, 0);
-	n->last_heartbeat_ns = now;
+	s->last_notice = now;
+	rose_replay_registration(n, s);
+	if(s->registered_node && _rose_send_registration(n, ROSE_MSG_HEARTBEAT, NULL, 0) == ROSE_OK) {
+		n->last_heartbeat_ns = now;
+	}
 }
 
 static void *rose_alloc(rose_node *node, size_t size) {
@@ -1091,15 +1151,16 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 		return NULL;
 	}
 
-	rose_node *n = allocate(sizeof(rose_node));
+	rose_node *n = allocate(sizeof(rose_node_storage));
 	if(!n) {
 		rose_record_error(ROSE_ERR_BUFFERSIZE,
 				  "rose_create_node could not allocate the rose_node structure. Suggestion: check your allocator or retry with more process memory available.");
 		return NULL;
 	}
-	memset(n, 0, sizeof(rose_node)); // Zero out to ensure all pointers are NULL
+	memset(n, 0, sizeof(rose_node_storage)); // Zero out to ensure all pointers are NULL
 	n->allocator = allocate;
 	n->deallocator = deallocate;
+	((rose_node_storage *) n)->last_notice = quicksand_now();
 
 	// replace "/" after first char with "%" for valid shared memory name
 	if(memchr(in_name, '/', (size_t) name_len) != NULL) {
@@ -1185,15 +1246,21 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	memcpy(topic, prefix, base_prefix_len); // base_prefix
 
 	sprintf(topic + base_prefix_len, "%s", "rosecore");
-	if(rose_connect_with_retry(n, &n->rosecore_pub.pub, topic, ROSE_REGISTRATION_MSG_SIZE, 8192, "rosecore publisher") != 0) goto connection_failed;
+	if(rose_connect_with_retry(n, &n->rosecore_pub.pub, topic, ROSE_REGISTRATION_MSG_SIZE, 8192, "rosecore publisher") != 0) {
+		goto connection_failed;
+	}
 	n->rosecore_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "roselog");
-	if(rose_connect_with_retry(n, &n->log_pub.pub, topic, ROSE_LOG_MESSAGE_SIZE, 8192, "roselog publisher") != 0) goto connection_failed;
+	if(rose_connect_with_retry(n, &n->log_pub.pub, topic, ROSE_LOG_MESSAGE_SIZE, 8192, "roselog publisher") != 0) {
+		goto connection_failed;
+	}
 	n->log_pub.node = n;
 
 	sprintf(topic + base_prefix_len, "%s", "param_query");
-	if(rose_connect_with_retry(n, &n->param_pub.pub, topic, 512, 8192, "parameter query publisher") != 0) goto connection_failed;
+	if(rose_connect_with_retry(n, &n->param_pub.pub, topic, 512, 8192, "parameter query publisher") != 0) {
+		goto connection_failed;
+	}
 	n->param_pub.node = n;
 
 	// full prefix
@@ -1201,13 +1268,17 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	size_t leaf_length = n->name_length - namespace_length;
 	snprintf(topic + prefix_len, leaf_length + 2, "%s%%", n->name + namespace_length);
 	sprintf(topic + prefix_len + leaf_length + 1, "%s", "params");
-	if(rose_connect_with_retry(n, &n->param_sub.sub, topic, 1024, 1024, "parameter reply subscriber") != 0) goto connection_failed;
+	if(rose_connect_with_retry(n, &n->param_sub.sub, topic, 1024, 1024, "parameter reply subscriber") != 0) {
+		goto connection_failed;
+	}
 	n->param_sub.node = n;
 	n->param_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->param_sub);
 
 	sprintf(topic + prefix_len + leaf_length + 1, "%s", "control");
-	if(rose_connect_with_retry(n, &n->control_sub.sub, topic, 1024, 1024, "control subscriber") != 0) goto connection_failed;
+	if(rose_connect_with_retry(n, &n->control_sub.sub, topic, 1024, 1024, "control subscriber") != 0) {
+		goto connection_failed;
+	}
 	n->control_sub.node = n;
 	n->control_sub.callback = NULL;
 	rose_subscriber_sync_latest(&n->control_sub);
@@ -1215,12 +1286,8 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	// Initialize heartbeat timestamp
 	n->last_heartbeat_ns = 0;
 
-	// Send NodeStart registration to rosecore
-	if(_rose_send_registration(n, ROSE_MSG_NODE_START, NULL, 0) != ROSE_OK) {
-		goto connection_failed;
-	}
-
-	// Caller retains remaps on every failed construction, including registration.
+	// Registration is deferred to rose_ok after a live core is confirmed.
+	// Caller retains remaps on every failed construction.
 	n->remaps = remaps;
 	n->remap_strlens = remap_string_lengths;
 	n->remap_count = remap_count;
@@ -1245,7 +1312,7 @@ i64 rose_ok(rose_node *n) {
 				  "rose_ok received a NULL node pointer. Suggestion: store the result of `rose_init(...)` and check it before entering your main loop.");
 		return 0;
 	}
-	_rose_send_heartbeat(n);
+	rose_maintain_discovery(n, quicksand_now());
 	return rose_remaining(&n->control_sub) == 0;
 }
 
@@ -1348,11 +1415,6 @@ rose_publisher *rose_create_pub(rose_node *n,
 		return NULL;
 	}
 
-	if(_rose_send_registration(n, ROSE_MSG_PUB_REGISTER, topic, strlen(topic)) != ROSE_OK) {
-		rose_quicksand_disconnect(n, &pub->pub);
-		memset(pub, 0, sizeof(*pub));
-		return NULL;
-	}
 	n->pubs_length += 1;
 
 	rose_clear_error();
@@ -1394,16 +1456,14 @@ rose_subscriber *rose_create_sub(rose_node *n,
 
 	int64_t ret = rose_quicksand_connect(n, &sub->sub, topic, -1, -1, -1);
 	if(ret != 0) {
-		char code_buf[128];
-		rose_format_errno_code(ret, code_buf, sizeof(code_buf));
 		if(ret == -ENOENT) {
-			rose_record_error_silent(ret,
-						 "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
-						 topic,
-						 code_buf,
-						 rose_connect_meaning(ret, 0),
-						 rose_connect_suggestion(ret, 0));
+			ROSE_LAST_ERROR_CODE = ret;
+			snprintf(ROSE_LAST_ERROR, sizeof(ROSE_LAST_ERROR),
+				 "Subscription failed: publisher topic \"%s\" does not exist. Retry after the publisher creates it.",
+				 topic);
 		} else {
+			char code_buf[128];
+			rose_format_errno_code(ret, code_buf, sizeof(code_buf));
 			rose_record_error(ret,
 					  "rose_create_sub failed for topic \"%s\": quicksand_connect returned %s, which means %s, while attaching to an existing quicksand buffer. Suggestion: %s",
 					  topic,
@@ -1417,8 +1477,8 @@ rose_subscriber *rose_create_sub(rose_node *n,
 
 	if(callback && sub->sub->buffer->message_size > MAX_MESSAGE_SIZE) {
 		rose_record_error(-EMSGSIZE,
-			"rose_create_sub: topic \"%s\" has a %llu-byte slot, exceeding the max callback size of %d bytes (including slot padding). Use a smaller publisher slot or explicit rose_read with a sufficiently large buffer.",
-			topic, (unsigned long long) sub->sub->buffer->message_size, MAX_MESSAGE_SIZE);
+				  "rose_create_sub: topic \"%s\" has a %llu-byte slot, exceeding the max callback size of %d bytes (including slot padding). Use a smaller publisher slot or explicit rose_read with a sufficiently large buffer.",
+				  topic, (unsigned long long) sub->sub->buffer->message_size, MAX_MESSAGE_SIZE);
 		rose_quicksand_disconnect(n, &sub->sub);
 		memset(sub, 0, sizeof(*sub));
 		return NULL;
@@ -1426,11 +1486,6 @@ rose_subscriber *rose_create_sub(rose_node *n,
 
 	rose_subscriber_sync_latest(sub);
 
-	if(_rose_send_registration(n, ROSE_MSG_SUB_REGISTER, topic, strlen(topic)) != ROSE_OK) {
-		rose_quicksand_disconnect(n, &sub->sub);
-		memset(sub, 0, sizeof(*sub));
-		return NULL;
-	}
 	n->subs_length += 1;
 
 	rose_clear_error();

@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "ros3.h"
 #include <assert.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,13 +99,18 @@ int main(void) {
 	assert(rose_read(isolated_sub, received) == ROSE_OK);
 	assert(sent->length == received->length && !memcmp(sent->data, received->data, sent->length));
 	printf("READY\n%s\n%s\n%s\n/%s\n", one->name, two->name, long_node->name, long_topic);
+	fflush(stdout);
+	struct pollfd input_ready = {.fd = STDIN_FILENO, .events = POLLIN};
+	while(poll(&input_ready, 1, 10) == 0) {
+		assert(rose_ok(one) && rose_ok(two) && rose_ok(long_node));
+	}
+	assert(long_node->registration_scratch);
 	assert(long_node->registration_scratch->length <= ROSE_REGISTRATION_MSG_SIZE);
 	printf("Registration: %llu bytes; declared capacity %d; physical payload capacity %llu\n",
 	       (unsigned long long) long_node->registration_scratch->length,
 	       ROSE_REGISTRATION_MSG_SIZE,
 	       (unsigned long long) (long_node->rosecore_pub.pub->buffer->message_size - 20));
 	fflush(stdout);
-	(void) getchar();
 	mirage_destroy(&sent, NULL);
 	mirage_destroy(&received, NULL);
 	rose_shutdown(one);

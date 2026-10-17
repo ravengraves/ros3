@@ -55,16 +55,16 @@ Terminal 1 (master):
 ./build/rosecore
 ```
 
-Terminal 2 (subscriber):
-
-```bash
-ROSE_BASE=robot1 ./sub
-```
-
-Terminal 3 (publisher):
+Terminal 2 (publisher):
 
 ```bash
 ROSE_BASE=robot1 ./pub
+```
+
+Terminal 3 (subscriber):
+
+```bash
+ROSE_BASE=robot1 ./sub
 ```
 
 Use one namespace per robot or environment to avoid topic collisions.

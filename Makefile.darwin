@@ -40,7 +40,7 @@ CEXE := -Wl,-dead_strip
 LDFLAGS :=
 CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 
-SOURCE := src/ros3.c
+SOURCE := src/ros3.c src/ros3_platform.h src/ros3_platform_posix.c src/ros3_platform_windows.c
 HEADER := include/ros3.h
 COMPLETION_BASH := cmd/ros3.bash
 COMPLETION_COMMANDS := rosecore rosenode rosetopic rosenet_tx rosenet_rx roseserial

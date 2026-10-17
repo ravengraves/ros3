@@ -9,9 +9,9 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "core.h"
 #include "../common/process.h"
 #include "../common/query.h"
+#include "core.h"
 #include "ros3.h"
 
 #include <ctype.h>
@@ -274,7 +274,7 @@ static int read_and_print_topics(quicksand_connection *conn, rose_query *query) 
 	}
 
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 		mirage_destroy(&msg, NULL);
 		return 1;
 	}
@@ -289,7 +289,7 @@ static int read_and_print_topics(quicksand_connection *conn, rose_query *query) 
 
 	mirage_destroy(&msg, NULL);
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 	}
 	return query->complete ? 0 : 1;
 }
@@ -352,7 +352,7 @@ static int read_and_print_topic_info(quicksand_connection *conn, rose_query *que
 	}
 
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 		mirage_destroy(&msg, NULL);
 		return 1;
 	}
@@ -380,7 +380,7 @@ static int read_and_print_topic_info(quicksand_connection *conn, rose_query *que
 
 	mirage_destroy(&msg, NULL);
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 	}
 	return query->complete ? 0 : 1;
 }

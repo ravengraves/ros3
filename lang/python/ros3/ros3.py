@@ -77,8 +77,10 @@ class Node:
     def ok(self) -> bool:
         """Check if the node should continue running.
 
-        Call this regularly in your main loop. It also sends heartbeats
-        to rosecore (rate-limited internally).
+        Call this regularly in your main loop. It also sends heartbeats to
+        rosecore and checks the latest core heartbeat at most once per 100 ms
+        without waiting. Introspection registration after a core is detected. A
+        missing core does not stop the node from running.
         """
         return _c.ok(self._capsule)
 

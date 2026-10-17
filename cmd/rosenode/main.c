@@ -9,9 +9,9 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "core.h"
 #include "../common/process.h"
 #include "../common/query.h"
+#include "core.h"
 #include "ros3.h"
 
 #include <errno.h>
@@ -148,7 +148,7 @@ static int read_and_print_list(quicksand_connection *conn, rose_query *query) {
 
 	mirage_destroy(&msg, NULL);
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 	}
 	return query->complete ? 0 : 1;
 }
@@ -206,7 +206,7 @@ static int read_and_print_info(quicksand_connection *conn, rose_query *query, co
 
 	mirage_destroy(&msg, NULL);
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 	}
 	return query->complete ? 0 : 1;
 }
@@ -265,7 +265,7 @@ static int read_and_kill(quicksand_connection *conn, rose_query *query, int use_
 
 	mirage_destroy(&msg, NULL);
 	if(!query->complete) {
-		fprintf(stderr, "Query timed out before Done\n");
+		fprintf(stderr, "Query timed out before Done. Is rosecore running?\n");
 	}
 	return query->complete ? 0 : 1;
 }

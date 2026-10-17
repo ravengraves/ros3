@@ -1,25 +1,44 @@
 # ROS3 🌹
 
-[ros3 ("rose" 🌹)](https://ros3.org) is a lightweight and high-performance pub/sub middleware for robotic systems.
+[ros3 ("rose" 🌹)](https://ros3.org) is a lightweight and high-performance
+pub/sub middleware for robotic systems.
 
-It is a ROS-like robotics runtime layer with lightning-fast system introspection tools and optional network and serial transports. ros3 uses [quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding. Overall, ros3 achieves 100x higher throughput, 30x lower latency, and 350x faster builds than [ROS2](http://ros2.org)!
+It is a ROS-like robotics runtime layer with lightning-fast system introspection
+tools and optional network and serial transports. ros3 uses[quicksand 🏜️]
+(https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮]
+(https://git.sr.ht/~alecgraves/mirage) for message encoding. Overall, ros3
+achieves 100x higher throughput, 30x lower latency, and 350x faster builds
+than [ROS2](http://ros2.org)!
 
 **Build Status:**
 [![ROS3 CI](https://github.com/ravengraves/ros3/actions/workflows/ci.yml/badge.svg)](https://github.com/ravengraves/ros3/actions/workflows/ci.yml)
 
 
 ## Performance
-ROS3 can achieve **387.08x** higher throughput and **88,605.32x** lower-latency than ROS2 on average with default settings. In [rosbench](https://git.sr.ht/~alecgraves/rosbench/), comparing ROS3 shared-memory against ROS2 single-process component runs over different communication topologies (averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2 Jazzy, with message sizes ranging from 32B to 1KiB):
 
-- Unicast (1:1): ros3 achieves **124.0x** higher throughput and **275,597.8x** lower latency
-- Pipeline (1:a:b:c): ros3 achieves **118.1x** higher throughput and **28.8x** lower latency
-- Sequencer (many:1): ros3 achieves **407.3x** higher throughput and **44.2x** lower latency
-- Multicast (1:many): ros3 achieves **148.1x** higher throughput and **167,314.6x** lower latency
-- Diamond (1:2:1): ros3 achieves **1,137.9x** higher throughput and **41.2x** lower latency
+ROS3 can achieve **387.08x** higher throughput and **88,605.32x** lower-latency
+than ROS2 on average with default settings. In [rosbench]
+(https://git.sr.ht/~alecgraves/rosbench/), comparing ROS3 shared-memory against
+ROS2 single-process component runs over different communication topologies
+(averaged across Fast DDS, CycloneDDS, ConnextDDS, and Zenoh middleware on ROS2
+Jazzy, with message sizes ranging from 32B to 1KiB):
 
-(and ROS3 is only hitting ~3.47% of theoretical RAM bandwidth for these message sizes. This could be further optimized with batched message reading.)
+- Unicast (1:1): ros3 achieves **124.0x** higher throughput and **275,597.8x**
+  lower latency
+- Pipeline (1:a:b:c): ros3 achieves **118.1x** higher throughput and **28.8x**
+  lower latency
+- Sequencer (many:1): ros3 achieves **407.3x** higher throughput and **44.2x**
+  lower latency
+- Multicast (1:many): ros3 achieves **148.1x** higher throughput
+  and **167,314.6x** lower latency
+- Diamond (1:2:1): ros3 achieves **1,137.9x** higher throughput and **41.2x**
+  lower latency
 
-See [rosbench](https://git.sr.ht/~alecgraves/rosbench/) for the full benchmark tables and plots.
+(and ROS3 is only hitting ~3.47% of theoretical RAM bandwidth for these message
+sizes. This could be further optimized with batched message reading.)
+
+See [rosbench](https://git.sr.ht/~alecgraves/rosbench/) for the full benchmark
+tables and plots.
 
 **Build Speed**
 > AMD Ryzen 5 7600X 6-Core Processor
@@ -51,16 +70,31 @@ ROS2:
 - rclcpp: 68.6M
 - rclc: 45.6M
 
-ROS3 is only ~45-60x smaller for a minimal install (though this was with `-O3` for ROS3, vs MinSizeRel / `-O2`).
+ROS3 is only ~45-60x smaller for a minimal install (though this was with `-O3`
+for ROS3, vs MinSizeRel / `-O2`).
 
 
 ## Usage - C 🚀
 
-Start `rosecore` in one terminal before running nodes:
+Run `rosecore` for node/topic introspection and centralized node management:
 
 ```bash
 ./build/rosecore
 ```
+
+Nodes can start immediately, even before `rosecore`. Keep calling `rose_ok()`
+(Python: `Node.ok()`), or use `rose_spin_forever()`. These automatically
+restore node and topic registrations when the core starts or restarts, while
+existing pub/sub connections keep working. Subscribers still need their
+publisher's topic to exist when they are created. Loops using `rose_spin_once
+()` should also call `rose_ok()`. It checks the latest core heartbeat at most
+once per 100 ms without waiting. Node and endpoint introspection registrations
+wait for a confirmed core heartbeat; data channels work immediately. Endpoints
+added during an outage are registered when it returns. Core shared-memory
+topics persist across shutdowns so nodes reuse their mappings. Upgrade the
+library, bindings, and core together. Only remove internal topics after
+stopping all participating processes. Discovery is best effort: failed writes
+are retried, but overwritten announcements are not acknowledged or refreshed.
 
 Publisher - C
 ```c
@@ -156,20 +190,21 @@ while node.ok():
     rose.sleep(0.01)
 ```
 
-`publisher.publish(...)` encodes with mirage 🔮 automatically, and `subscriber` yields decoded Python objects.
+`publisher.publish(...)` encodes with mirage 🔮 automatically, and `subscriber`
+yields decoded Python objects.
 
 `node.subscriber("topic", latest_only=True)` consumes the newest queued message
 for `read()`, `read_raw()`, and iteration, skipping older messages. The default
 consumes messages in order. `read_latest()` and `read_latest_raw()` explicitly
-consume the newest message under either policy. Reads return `None` when no data
-is available; iteration yields a decoded `None` payload normally.
+consume the newest message under either policy. Reads return `None` when no
+data is available; iteration yields a decoded `None` payload normally.
 
-Use `with ros3.Node("name") as node:` or call `node.close()` / `node.shutdown()`
-to release resources. Closing is idempotent and closes every endpoint; further
-operations raise `RuntimeError`. Endpoints retain the native node if its Python
-`Node` object is collected. The last handle releases resources automatically.
-Native node operations are serialized across Python threads, and subscriber
-reads also protect the buffer copy before decoding.
+Use `with ros3.Node("name") as node:` or call `node.close()` / `node.shutdown
+()` to release resources. Closing is idempotent and closes every endpoint;
+further operations raise `RuntimeError`. Endpoints retain the native node if
+its Python `Node` object is collected. The last handle releases resources
+automatically. Native node operations are serialized across Python threads, and
+subscriber reads also protect the buffer copy before decoding.
 
 ## Build and Install 📖
 
@@ -181,7 +216,9 @@ On Linux, install or upgrade ros3, mirage, quicksand, and their Python bindings:
 curl -fsSL https://raw.githubusercontent.com/ravengraves/ros3/master/install.sh -o /tmp/ros3-install.sh && sh /tmp/ros3-install.sh
 ```
 
-Requires the build tools, Python/pip, and sudo access. While the repositories are private, authenticate both curl and Git with GitHub credentials that can access them.
+Requires the build tools, Python/pip, and sudo access. While the repositories
+are private, authenticate both curl and Git with GitHub credentials that can
+access them.
 
 ### Manual install
 
@@ -210,7 +247,8 @@ make
 sudo make install
 ```
 
-Documentation is installed separately and requires `scdoc` (on Debian/Ubuntu: `sudo apt install scdoc`).
+Documentation is installed separately and requires `scdoc` (on Debian/Ubuntu:
+`sudo apt install scdoc`).
 
 Optional targets:
 ```bash
@@ -226,18 +264,30 @@ Windows support is in progress. For now, use WSL.
 
 ## Tools 🛠
 
-- `rosecore` - central node/topic registry and discovery daemon. Example: `rosecore`
-- `rosenode` - inspect or kill running nodes. Example: `rosenode list`
-- `rosenode info` - show metadata for one node. Example: `rosenode info demo`
-- `rosenode kill` - stop a node by name. Example: `rosenode kill demo`
-- `rosetopic` - inspect topic state and traffic. Example: `rosetopic list`
-- `rosetopic info` - show publishers and subscribers for a topic. Example: `rosetopic info /chatter`
-- `rosetopic echo` - stream topic payload bytes. Example: `rosetopic echo /chatter`
-- `rosetopic hz` - measure message rate. Example: `rosetopic hz /chatter`
-- `rosetopic rm` - remove an old topic shared-memory segment. Example: `rosetopic rm /chatter`
-- `rosenet_tx` - bridge a local topic to TCP or UDP. Example: `rosenet_tx --topic /cam --host 10.0.0.2 --port 19999`
-- `rosenet_rx` - receive TCP or UDP and publish into ROS3. Example: `rosenet_rx --topic /cam_remote --port 19999 --message_size 65536 --message_rate 64`
-- `roseserial` - bridge a serial device and ROS3 topics. Example: `roseserial /dev/ttyUSB0 /mcu/rx /mcu/tx 115200 1024 256`
+- `rosecore` - central node/topic registry and discovery daemon. 
+	- Example: `rosecore`
+- `rosenode` - inspect or kill running nodes. 
+	- Example: `rosenode list`
+- `rosenode info` - show metadata for one node. 
+	- Example: `rosenode info demo`
+- `rosenode kill` - stop a node by name. 
+	- Example: `rosenode kill demo`
+- `rosetopic` - inspect topic state and traffic. 
+	- Example: `rosetopic list`
+- `rosetopic info` - show publishers and subscribers for a topic. 
+	- Example: `rosetopic info /chatter`
+- `rosetopic echo` - stream topic payload bytes. 
+	- Example: `rosetopic echo /chatter`
+- `rosetopic hz` - measure message rate. 
+	- Example: `rosetopic hz /chatter`
+- `rosetopic rm` - remove an old topic shared-memory segment.
+	- Example: `rosetopic rm /chatter`
+- `rosenet_tx` - bridge a local topic to TCP or UDP. 
+	- Example: `rosenet_tx --topic /cam --host 10.0.0.2 --port 19999`
+- `rosenet_rx` - receive TCP or UDP and publish into ROS3. 
+	- Example: `rosenet_rx --topic /cam_remote --port 19999 --message_size 65536 --message_rate 64`
+- `roseserial` - bridge a serial device and ROS3 topics.
+	- Example: `roseserial /dev/ttyUSB0 /mcu/rx /mcu/tx 115200 1024 256`
 
 Shared environment:
 
@@ -253,11 +303,11 @@ With `ROSE_BASE=robot1` and `__ns:=front`, `camera` resolves to
 `/robot1%front%camera` and `/camera` resolves to `/robot1%camera`.
 
 Name segments allow letters, digits, `_`, `-`, and `.`. Topics have no empty
-segments or trailing slash; namespaces accept an optional leading/trailing slash
-and `/` means root. `%`, commas and embedded NULs are invalid. Every complete
-transport name, including internal channel suffixes, is limited to 255 bytes
-plus its terminating NUL. The longest core suffix currently limits the base
-token to 235 bytes; node namespaces/names must also leave room for PID and
+segments or trailing slash; namespaces accept an optional leading/trailing
+slash and `/` means root. `%`, commas and embedded NULs are invalid. Every
+complete transport name, including internal channel suffixes, is limited to 255
+bytes plus its terminating NUL. The longest core suffix currently limits the
+base token to 235 bytes; node namespaces/names must also leave room for PID and
 private channel suffixes.
 
 `source:=destination` rules compare namespace-resolved sources, use the last
@@ -297,10 +347,23 @@ make sanitize-check
 make analysis
 ```
 
-## Name / Etymology / etc.
-ROS3 (pronounced "Rose" 🌹) is the third version of a shared memory message passing system that was developed in 2023 at the Univeristy of Texas at San Antonio for an operating systems class final project. ROS3 is an acronym for Roadrunner/Robotics Object System version 3 (with the other versions being [featherring](https://git.sr.ht/~alecgraves/featherring/) and [ravenring](https://git.sr.ht/~alecgraves/ravenring/)). The ending "3" of ROS3 is also [1337-speak](https://en.wikipedia.org/wiki/Leet) for "E", meaning "Efficient", "Easy to use", and "Easy to install"
+## Name / Etymology / etc. 
+ROS3 (pronounced "Rose" 🌹) is the third version of a
+shared memory message passing system that was developed in 2023 at the
+Univeristy of Texas at San Antonio for an operating systems class final
+project. ROS3 is an acronym for Roadrunner/Robotics Object System version 3
+(with the other versions being [featherring]
+(https://git.sr.ht/~alecgraves/featherring/) and [ravenring]
+(https://git.sr.ht/~alecgraves/ravenring/)). The ending "3" of ROS3 is also
+[1337-speak](https://en.wikipedia.org/wiki/Leet) for "E",
+meaning "Efficient", "Easy to use", and "Easy to install"
 
-ROS3 is based loosely on the [LMAX disruptor](https://lmax-exchange.github.io/disruptor/) (a pun on the weaker 'phaser'), but with protocol modifications to enable less-restrictive time-based coordination between publishers and subscribers as well as read-last behavior for low-latency. ROS3 is also written in C (instead of Java) for better portability and performance on constrained embedded systems.
+ROS3 is based loosely on the [LMAX disruptor]
+(https://lmax-exchange.github.io/disruptor/) (a pun on the weaker 'phaser'),
+but with protocol modifications to enable less-restrictive time-based
+coordination between publishers and subscribers as well as read-last behavior
+for low-latency. ROS3 is also written in C (instead of Java) for better
+portability and performance on constrained embedded systems.
 
 ## License ⚖
 

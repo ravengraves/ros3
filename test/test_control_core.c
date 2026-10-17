@@ -1,14 +1,37 @@
+#define _POSIX_C_SOURCE 200809L
 #define quicksand_write capture_write
 #include "../cmd/common/query.h"
+static i64 election_read(quicksand_connection *, u8 *, i64 *);
+#define quicksand_read election_read
 #include "../cmd/rosecore/main.c"
+#undef quicksand_read
 #undef quicksand_write
 #include <assert.h>
 #include <sys/wait.h>
 
 static i64 writes, largest;
 static rose_query expected = {.dump = 1};
+static int election_testing, election_reads;
+static rose_core_heartbeat election_peer;
+
+static i64 election_read(quicksand_connection *c, u8 *data, i64 *size) {
+	(void) c;
+	if(election_reads++) {
+		return -1;
+	}
+	assert(*size >= (i64) sizeof(election_peer));
+	election_peer.timestamp = quicksand_now();
+	memcpy(data, &election_peer, sizeof(election_peer));
+	*size = sizeof(election_peer);
+	return 0;
+}
+
 i64 capture_write(quicksand_connection *c, u8 *data, i64 size) {
 	(void) c;
+	if(election_testing) {
+		assert(size == sizeof(rose_core_heartbeat));
+		return 0;
+	}
 	assert(data && size > 0 && size <= ROSE_QUERY_MSG_SIZE);
 	mirage_msg m = {.data = data, .length = size, .max_length = size};
 	static char name[ROSE_MAX_NAME_LEN], pubs[ROSE_TOPIC_CSV_SIZE], subs[ROSE_TOPIC_CSV_SIZE];
@@ -27,6 +50,25 @@ i64 capture_write(quicksand_connection *c, u8 *data, i64 size) {
 }
 
 int main(void) {
+	// Drive the real election loop: READY always wins, otherwise lower PID wins.
+	election_testing = 1;
+	for(int scenario = 0; scenario < 4; ++scenario) {
+		quicksand_ringbuffer ring = {0};
+		quicksand_connection conn = {.buffer = &ring};
+		rose_core_heartbeat self = {1, ROSE_CORE_STARTING, 1000, quicksand_now(), 0};
+		election_peer = self;
+		election_peer.pid = scenario == 0 ? 999 : 1001;
+		if(scenario == 2) {
+			election_peer.state = ROSE_CORE_READY;
+		}
+		if(scenario == 3) {
+			election_peer = self; // Ignore own heartbeat.
+		}
+		election_reads = 0;
+		assert(startup_heartbeat_resolution(&conn, &self) == (scenario == 0 || scenario == 2));
+	}
+	election_testing = 0;
+	puts("core election: lower STARTING PID and any READY peer take priority");
 	char canonical_topic[256];
 	assert(rose_topic_to_shm(canonical_topic, sizeof(canonical_topic), "robot/topic"));
 	assert(valid_registration_name(canonical_topic, (i64) strlen(canonical_topic), 1));

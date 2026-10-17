@@ -29,7 +29,7 @@ rule copy
   command = prefix=$${PREFIX:-/usr/local}; mkdir -p $$(dirname "$$prefix/$out") && cp $in "$$prefix/$out"
   description = COPY $out
 
-build $builddir/ros3.o: cc src/ros3.c
+build $builddir/ros3.o: cc src/ros3.c | include/ros3.h src/ros3_platform.h src/ros3_platform_posix.c src/ros3_platform_windows.c
 build $builddir/libros3.a: ar $builddir/ros3.o
 build $builddir/libros3.dll: link_dll $builddir/ros3.o
 

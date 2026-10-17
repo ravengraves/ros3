@@ -12,7 +12,7 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 
 # Test namespace
-export ROSE_BASE="test"
+export ROSE_BASE="test_utils_$$"
 
 pass() { echo -e "${GREEN}PASS${NC}: $1"; }
 fail() { echo -e "${RED}FAIL${NC}: $1"; cleanup; exit 1; }
@@ -90,6 +90,7 @@ cleanup_topics() {
     remove_topic /rosecore_dump
     remove_topic /rosecore_lookup
     remove_topic /rosecore_heartbeat
+    remove_topic /rosecore_request
 }
 
 cleanup() {
@@ -97,6 +98,7 @@ cleanup() {
     [ -n "$TEST_PID" ] && kill "$TEST_PID" 2>/dev/null || true
     [ -n "$SECOND_CORE_PID" ] && kill "$SECOND_CORE_PID" 2>/dev/null || true
     [ -n "$CORE_PID" ] && kill "$CORE_PID" 2>/dev/null || true
+    wait 2>/dev/null || true
     cleanup_topics
 }
 trap cleanup EXIT INT TERM
@@ -161,11 +163,15 @@ kill "$CORE_PID" 2>/dev/null || true
 wait "$CORE_PID" 2>/dev/null || true
 CORE_PID=""
 
-expect_echo_fail /rosecore || fail "rosecore topic still connectable after exit"
-expect_echo_fail /rosecore_dump || fail "rosecore dump topic still connectable after exit"
-expect_echo_fail /rosecore_lookup || fail "rosecore lookup topic still connectable after exit"
-expect_echo_fail /rosecore_heartbeat || fail "rosecore heartbeat topic still connectable after exit"
-pass "rosecore core topic cleanup"
+for topic in rosecore rosecore_dump rosecore_lookup rosecore_heartbeat rosecore_request; do
+    if expect_echo_fail "/$topic"; then
+        fail "$topic was removed on core exit"
+    fi
+done
+if ROSE_QUERY_TIMEOUT_MS=50 "$BUILD_DIR/rosenode" list >/dev/null 2>&1; then
+    fail "registry query succeeded without a running core"
+fi
+pass "rosecore topics persist; registry queries still need a core"
 
 echo -e "\n${GREEN}Util tests passed!${NC}"
 exit 0

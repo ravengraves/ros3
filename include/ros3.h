@@ -74,7 +74,7 @@ struct rose_node {
 	void *(*allocator)(size_t);
 	void (*deallocator)(void *);
 
-	u64 last_heartbeat_ns; // Timestamp of last heartbeat sent (nanoseconds)
+	u64 last_heartbeat_ns; // Timestamp of last heartbeat sent (Quicksand CPU ticks)
 
 	// Scratch storage belongs to this node and uses its allocator pair.
 	mirage_msg *registration_scratch;
@@ -123,6 +123,22 @@ i64 rose_last_error_code(void);
 #define ROSE_TOPIC_LOOKUP "rosecore_lookup"
 #define ROSE_TOPIC_HEARTBEAT "rosecore_heartbeat"
 
+// Core heartbeat wire format shared by the library and daemon.
+#define ROSE_CORE_STARTING 1
+#define ROSE_CORE_READY 2
+#define ROSE_CORE_INTERVAL_NS 100000000ULL
+#define ROSE_CORE_TIMEOUT_NS 500000000ULL
+
+typedef struct {
+	uint32_t version, state;
+	i64 pid;
+	u64 instance_stamp, timestamp; // Quicksand's monotonic CPU ticks.
+} rose_core_heartbeat;
+
+// Returns nonzero for a supported, well-formed, fresh heartbeat.
+// Pass the current Quicksand CPU timestamp as now; NULL returns zero.
+int rose_core_heartbeat_valid(const rose_core_heartbeat *h, u64 now);
+
 // Registry bounds include the terminating NUL in each name buffer.
 #define ROSE_MAX_NODES 1024
 #define ROSE_MAX_TOPICS 64
@@ -170,9 +186,9 @@ rose_node *rose_create_node(char *name, i64 name_length,
 // Names/prefixes accept -1 for strlen or exact byte spans without embedded NULs.
 // Remap storage transfers to the node only on successful construction; on
 // failure it remains caller-owned. Transferred storage must use the same hooks.
-// Construction returns NULL if initial discovery encoding/allocation/write fails.
-// Check rose_last_error_code/message; success means the registration was written
-// to the transport, not acknowledged by rosecore.
+// Construction does not wait for or register with rosecore. rose_ok registers
+// the node and its endpoints after confirming a live core heartbeat; failed
+// registration writes are retried on later checks.
 // Remaps contain 2*count NUL-terminated strings and matching lengths excluding
 // NUL. The caller must provide buffers covering those lengths and terminators;
 // this API has no aggregate capacities. Do not mutate transferred storage.
@@ -183,19 +199,25 @@ rose_node *rose_create_node(char *name, i64 name_length,
 // must not be used after destruction.
 void rose_shutdown(rose_node *n);
 
+// Also maintains discovery when rosecore starts late or restarts. Core absence
+// does not stop the node. Checks the latest core heartbeat at most once per
+// 100 ms without waiting. Call regularly (rose_spin_forever does this for you).
+// Core channels persist across restarts; do not unlink them while nodes run.
 i64 rose_ok(rose_node *n);
 
 /// ---------------- Pub / Sub -------------------------------------------------
 
-// Endpoint constructors return NULL and leave table lengths unchanged if their
-// discovery registration fails. Partial connections are disconnected without
-// unlinking shared channels; callers may retry after inspecting the last error.
+// Endpoint constructors create/attach the data channel immediately. Discovery
+// registration is deferred to rose_ok. Construction errors leave table lengths
+// unchanged and do not unlink shared channels; inspect the last error and retry.
 
 rose_publisher *rose_create_pub(rose_node *n, char *name, i64 name_length,
 				u64 message_length, u64 message_hz);
 
 // Callback subscriptions reject transport slots larger than 6,220,800 bytes
 // (including transport padding). Use explicit reads for larger slots.
+// Missing publisher topics return NULL immediately without printing; callers
+// may wait and retry. Inspect rose_last_error_code() (-ENOENT) and rose_last_error().
 rose_subscriber *rose_create_sub(rose_node *n, char *name, i64 name_length,
 				 u64 latest_only, void (*callback)(mirage_msg *));
 
@@ -216,6 +238,7 @@ u64 rose_remaining(rose_subscriber *s);
 // requested. Both spin functions return after a callback requests shutdown;
 // the node is destroyed before that outer spin call returns. Different nodes
 // may be spun recursively, provided their lifetimes are externally serialized.
+// Call rose_ok in the surrounding loop for discovery and control checks.
 void rose_spin_once(rose_node *n);
 
 // Checks rose_ok each iteration for heartbeats/control. A control stop returns

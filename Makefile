@@ -43,7 +43,7 @@ ifeq ($(findstring clang,$(notdir $(CC))),clang)
 endif
 CXXFLAGS := -Wall -Wextra -Wpedantic -Werror -std=c++17 -Iinclude $(DEPENDENCY_INCLUDE_DIRS) -O3
 
-SOURCE := src/ros3.c
+SOURCE := src/ros3.c src/ros3_platform.h src/ros3_platform_posix.c src/ros3_platform_windows.c
 HEADER := include/ros3.h
 COMPLETION_BASH := cmd/ros3.bash
 COMPLETION_COMMANDS := rosecore rosenode rosetopic rosenet_tx rosenet_rx roseserial
@@ -237,7 +237,7 @@ fanalyzer:
 		$(GCC_ANALYZER) $(ANALYZE_CFLAGS) -fanalyzer -c $$src -o /dev/null; \
 	done
 
-check-runtime: $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
+check-runtime: check-discovery $(BIN_TARGETS) $(BUILD_DIR)/test $(BUILD_DIR)/test_net_pub $(BUILD_DIR)/test_net_sub
 	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test/test_utils.sh
 	BUILD_DIR="$(abspath $(BUILD_DIR))" ./test/test_net.sh
 
@@ -411,3 +411,16 @@ check-liaison: $(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenet_rx $(BUILD_DIR)/rosene
 	BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_liaison_integrity.py
 
 include test/embedded_serial.mk
+
+$(BUILD_DIR)/test_discovery: test/test_discovery.c $(SOURCE) $(HEADER)
+	mkdir -p $(BUILD_DIR)
+	$(CC) $(CFLAGS_LTO) $(CEXE) -o $@ $< $(DEP_STATIC_LIBS)
+
+.PHONY: check-discovery check-discovery-python
+check-discovery: $(BUILD_DIR)/test_discovery $(BUILD_DIR)/rosecore $(BUILD_DIR)/rosenode $(BUILD_DIR)/rosetopic
+	$(BUILD_DIR)/test_discovery
+	BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_discovery.py
+
+# Requires the Python bindings and their dependencies to be installed.
+check-discovery-python: check-discovery $(BUILD_DIR)/libros3.so
+	LD_LIBRARY_PATH="$(abspath $(BUILD_DIR)):$(PREFIX)/lib:$$LD_LIBRARY_PATH" BUILD_DIR="$(abspath $(BUILD_DIR))" python3 test/test_discovery.py --python

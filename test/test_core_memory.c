@@ -21,7 +21,9 @@ static int delete_count, successful_writes;
 i64 memory_connect(quicksand_connection **out, char *name, i64 length,
 		   i64 size, i64 rate, void *alloc) {
 	++connect_calls;
-	if(connect_error && connect_calls > connect_fail_after) return connect_error;
+	if(connect_error && connect_calls > connect_fail_after) {
+		return connect_error;
+	}
 	(void) size;
 	(void) rate;
 	(void) alloc;
@@ -193,7 +195,12 @@ static void test_remap_capacity(void) {
 
 static void test_failures(void) {
 	char *argv[] = {"test", "local:=mapped"};
-	for(size_t failure = 1; failure <= 8; ++failure) {
+	calls = 0;
+	rose_node *probe = rose_init(2, argv, "probe", alloc_a, free_a);
+	assert(probe);
+	size_t construction_calls = calls;
+	rose_shutdown(probe);
+	for(size_t failure = 1; failure <= construction_calls; ++failure) {
 		calls = 0;
 		fail_call = failure;
 		assert(!rose_init(2, argv, "node", alloc_a, free_a));
