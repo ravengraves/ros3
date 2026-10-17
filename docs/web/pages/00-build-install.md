@@ -1,5 +1,39 @@
 ## Build and Installation
 
+### Quick install (Linux)
+
+Install the build tools and Python prerequisites for your distribution:
+
+**Debian/Ubuntu:**
+
+```sh
+sudo apt install curl git build-essential llvm clang lld python3-dev python3-pip
+```
+
+**Arch Linux:**
+
+```sh
+sudo pacman -Syu --needed curl git base-devel llvm clang lld python python-pip
+```
+
+**Fedora:**
+
+```sh
+sudo dnf install curl git make gcc gcc-c++ llvm clang lld python3-devel python3-pip
+```
+
+Download and run the installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ravengraves/ros3/master/install.sh -o /tmp/ros3-install.sh && sh /tmp/ros3-install.sh
+```
+
+The installer looks for `../rose`, `./rose`, then `~/rose`, creating `~/rose` if needed. It clones missing repositories or pulls updates to existing ones over HTTPS, then runs `make`, `sudo make install`, and `make python` for mirage, quicksand, and ros3 in that order. Run it again to upgrade.
+
+While the repositories are private, authenticate both curl and Git with GitHub credentials that can access them. Installation requires sudo access.
+
+Documentation is optional and is installed separately; the quick install does not require `scdoc` or `pandoc`.
+
 ### Repositories
 
 - `ros3`: <https://git.sr.ht/~alecgraves/ros3>
@@ -15,9 +49,9 @@
 
 ### Linux (e.g. Debian)
 
-install scdoc (for docs) and build deps:
+Install build dependencies:
 ```
-sudo apt install scdoc git build-essential llvm clang clang-tidy clang-format
+sudo apt install git build-essential llvm clang lld python3-dev python3-pip
 ```
 
 **1. Install mirage:**
@@ -26,13 +60,11 @@ sudo apt install scdoc git build-essential llvm clang clang-tidy clang-format
 git clone https://git.sr.ht/~alecgraves/mirage
 cd mirage
 make
-make check
-make docs
 ```
 
 Install (as root):
 ```
-# make install install-docs
+sudo make install
 ```
 
 Install mirage Python package:
@@ -51,13 +83,11 @@ cd ..
 git clone https://git.sr.ht/~alecgraves/quicksand
 cd quicksand
 make
-make check
-make docs
 ```
 
 Install (as root):
 ```
-# make install install-docs
+sudo make install
 ```
 
 Install quicksand Python package:
@@ -76,13 +106,11 @@ cd ..
 git clone https://git.sr.ht/~alecgraves/ros3
 cd ros3
 make
-make check
-make docs
 ```
 
 Install (as root):
 ```
-# make install install-docs
+sudo make install
 ```
 
 Install ros3 Python package:
@@ -91,9 +119,21 @@ make python
 make check-python
 ```
 
-Webdocs (this guide):
-```
+**Optional documentation:**
+
+Install `scdoc`, then build and install manpages from each repository:
+
+```sh
+sudo apt install scdoc
 make docs
+sudo make install-docs
+```
+
+To build this web guide from the ros3 repository:
+
+```sh
+sudo apt install pandoc
+make webdocs
 ```
 
 *Congrats, you have installed ros3!*

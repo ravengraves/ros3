@@ -173,16 +173,25 @@ reads also protect the buffer copy before decoding.
 
 ## Build and Install 📖
 
+### Quick install
+
+On Linux, install or upgrade ros3, mirage, quicksand, and their Python bindings:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ravengraves/ros3/master/install.sh -o /tmp/ros3-install.sh && sh /tmp/ros3-install.sh
+```
+
+Requires the build tools, Python/pip, and sudo access. While the repositories are private, authenticate both curl and Git with GitHub credentials that can access them.
+
+### Manual install
+
 Install dependencies first:
 
-- `scdoc`
 - `mirage` 🔮
 - `quicksand` 🏜️
 
 Example Linux flow:
 ```bash
-sudo apt install scdoc
-
 git clone https://git.sr.ht/~alecgraves/mirage
 cd mirage
 make
@@ -200,6 +209,8 @@ cd ros3
 make
 sudo make install
 ```
+
+Documentation is installed separately and requires `scdoc` (on Debian/Ubuntu: `sudo apt install scdoc`).
 
 Optional targets:
 ```bash
