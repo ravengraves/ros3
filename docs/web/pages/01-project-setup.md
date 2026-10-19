@@ -47,6 +47,13 @@ These will be set to a ros3 workspace (ros3/bin ros3/lib ros3/include) during de
 export ROSE_BASE=robot1
 ```
 
+Resolved topic names can be at most **245 bytes**, including `ROSE_BASE`, node
+namespace prefixes, separators and internal channel suffixes, excluding the
+terminating NUL. Longer names are rejected. With the default `ROSE_BASE=rose`
+and no node namespace, the topic itself can use up to 239 ASCII characters.
+The base token can be at most 225 bytes; node names must also leave room for
+their PID and private channel suffixes within the 245-byte limit.
+
 ### Startup workflow
 
 Terminal 1 (master):

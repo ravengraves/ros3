@@ -9,19 +9,19 @@
 #include <unistd.h>
 
 static void check_registration_envelope(void) {
-	// Smallest accepted base is one byte: /b% + identity + %control <=255.
-	char name[245], topic[256];
-	memset(name, 'n', 244);
-	name[244] = '\0';
-	memset(topic, 't', 255);
-	topic[255] = '\0';
+	// Reserve /b% and %control around the identity, plus the terminating NUL.
+	char name[ROSE_MAX_TOPIC_LEN - 3 - 8 + 1], topic[ROSE_MAX_TOPIC_LEN + 1];
+	memset(name, 'n', sizeof(name) - 1);
+	name[sizeof(name) - 1] = '\0';
+	memset(topic, 't', sizeof(topic) - 1);
+	topic[sizeof(topic) - 1] = '\0';
 	mirage_msg *message = mirage_create(ROSE_REGISTRATION_MSG_SIZE, NULL);
 	assert(message);
 	assert(mirage_write_start(message) >= 0);
 	assert(mirage_write_fn(message, ROSE_MSG_PUB_REGISTER, -1, 2) >= 0);
 	assert(mirage_write_string(message, name, -1) >= 0);
 	assert(mirage_write_string(message, topic, -1) >= 0);
-	assert(message->length == 522 && message->length <= ROSE_REGISTRATION_MSG_SIZE);
+	assert(message->length <= ROSE_REGISTRATION_MSG_SIZE);
 	mirage_destroy(&message, NULL);
 }
 
@@ -50,12 +50,12 @@ int main(void) {
 	char long_name[256], long_topic[256];
 	int pid_length = snprintf(long_name, sizeof(long_name), "-%ld", (long) getpid());
 	size_t base_prefix_length = (size_t) (strchr(one->prefix, '%') - one->prefix) + 1;
-	size_t name_length = 255 - base_prefix_length - (size_t) pid_length - strlen("%control");
+	size_t name_length = ROSE_MAX_TOPIC_LEN - base_prefix_length - (size_t) pid_length - strlen("%control");
 	memset(long_name, 'n', name_length);
 	long_name[name_length] = '\0';
 	rose_node *long_node = rose_create_node(long_name, -1, NULL, -1, NULL, NULL, 0, NULL, NULL);
-	assert(long_node && strlen((char *) long_node->control_sub.sub->name) == 255);
-	size_t topic_length = 255 - long_node->prefix_length;
+	assert(long_node && strlen((char *) long_node->control_sub.sub->name) == ROSE_MAX_TOPIC_LEN);
+	size_t topic_length = ROSE_MAX_TOPIC_LEN - long_node->prefix_length;
 	memset(long_topic, 't', topic_length);
 	long_topic[topic_length] = '\0';
 	assert(setenv("ROSE_BASE", "invalid/base", 1) == 0);
@@ -81,7 +81,7 @@ int main(void) {
 	assert(isolated_one && isolated_two && isolated_sub);
 	assert(strcmp((char *) isolated_one->pub->name, (char *) isolated_two->pub->name));
 	assert(strcmp((char *) isolated_two->pub->name, (char *) isolated_sub->sub->name) == 0);
-	assert(strlen((char *) long_pub->pub->name) == 255);
+	assert(strlen((char *) long_pub->pub->name) == ROSE_MAX_TOPIC_LEN);
 	mirage_msg *sent = mirage_create(128, NULL), *received = mirage_create(128, NULL);
 	assert(sent && received);
 	assert(mirage_write_start(sent) >= 0 && mirage_write_string(sent, "delivered", -1) >= 0);

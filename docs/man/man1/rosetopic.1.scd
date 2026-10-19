@@ -20,6 +20,11 @@ rosetopic - inspect and monitor ROS3 topics
 
 Lists topics, prints publisher/subscriber details, streams message payloads, measures topic frequency, or unlinks a topic shared-memory segment.
 
+Resolved topic names are limited to 245 bytes, including ROSE_BASE, namespace
+prefixes and separators, excluding the terminating NUL. Longer names are
+rejected. With the default base and no node namespace, the topic itself can
+use up to 239 ASCII characters. ROSE_BASE is limited to 225 bytes.
+
 # EXAMPLES
 
 ## List active topics

@@ -139,6 +139,9 @@ typedef struct {
 // Pass the current Quicksand CPU timestamp as now; NULL returns zero.
 int rose_core_heartbeat_valid(const rose_core_heartbeat *h, u64 now);
 
+// Maximum resolved topic name in bytes, excluding NUL; reserves suffix space.
+#define ROSE_MAX_TOPIC_LEN 245
+
 // Registry bounds include the terminating NUL in each name buffer.
 #define ROSE_MAX_NODES 1024
 #define ROSE_MAX_TOPICS 64
@@ -165,10 +168,11 @@ int rose_core_heartbeat_valid(const rose_core_heartbeat *h, u64 now);
  * Topic remaps match fully namespace-resolved sources, last match wins, and
  * apply once. Relative destinations use the node namespace; absolute ones
  * use the ROSE_BASE captured at construction, even if the environment changes.
- * All rules, including shadowed rules, must fully resolve within 255 bytes at
+ * All rules, including shadowed rules, must fully resolve within 245 bytes at
  * construction; invalid configuration rejects the node before attaching rings.
- * All transport names (including private channel suffixes) fit 255 bytes,
- * plus a separate byte for NUL. Standalone rose_topic_to_shm uses current env.
+ * Resolved topic names are limited to ROSE_MAX_TOPIC_LEN (245) bytes, including
+ * the base, namespace, separators and private channel suffixes, excluding NUL.
+ * Oversized names are rejected. Standalone rose_topic_to_shm uses current env.
  * n->name and discovery use "namespace/name-PID", or "name-PID" at root.
  * Namespaces are relative to the base. A name must be unique within its
  * namespace and process; duplicate instances there are unsupported.

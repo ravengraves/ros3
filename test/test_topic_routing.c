@@ -114,7 +114,8 @@ static void test_base_boundaries(void) {
 				  ROSE_TOPIC_DUMP, ROSE_TOPIC_LOOKUP, ROSE_TOPIC_HEARTBEAT};
 	char *argv[] = {"test"};
 	// Canonical length excludes one optional leading and trailing slash.
-	for(size_t length = 235; length <= 237; ++length) {
+	size_t max_base = ROSE_MAX_TOPIC_LEN - 2 - strlen(ROSE_TOPIC_HEARTBEAT);
+	for(size_t length = max_base; length <= max_base + 2; ++length) {
 		for(size_t slashes = 0; slashes < 4; ++slashes) {
 			size_t offset = slashes & 1;
 			base[0] = '/';
@@ -127,11 +128,11 @@ static void test_base_boundaries(void) {
 			assert(setenv("ROSE_BASE", base, 1) == 0);
 			for(size_t i = 0; i < sizeof(suffixes) / sizeof(*suffixes); ++i) {
 				memset(output, '?', sizeof(output));
-				if(length == 235) {
+				if(length == max_base) {
 					assert(rose_topic_to_shm(output, 256, suffixes[i]));
-					assert(strlen(output) == 237 + strlen(suffixes[i]));
-					assert(output[0] == '/' && output[236] == '%');
-					assert(strcmp(output + 237, suffixes[i]) == 0);
+					assert(strlen(output) == length + 2 + strlen(suffixes[i]));
+					assert(output[0] == '/' && output[length + 1] == '%');
+					assert(strcmp(output + length + 2, suffixes[i]) == 0);
 					assert(output[256] == '?');
 				} else {
 					assert(!rose_topic_to_shm(output, 256, suffixes[i]));
@@ -141,9 +142,9 @@ static void test_base_boundaries(void) {
 					}
 				}
 			}
-			if(length == 235) {
-				// A 255-byte transport name still needs a separate NUL byte.
-				for(size_t capacity = 0; capacity <= 255; capacity += 255) {
+			if(length == max_base) {
+				// The longest accepted topic still needs a separate NUL byte.
+				for(size_t capacity = 0; capacity <= ROSE_MAX_TOPIC_LEN; capacity += ROSE_MAX_TOPIC_LEN) {
 					memset(output, '?', sizeof(output));
 					assert(!rose_topic_to_shm(output, capacity, ROSE_TOPIC_HEARTBEAT));
 					for(size_t j = 0; j < sizeof(output); ++j) {
@@ -151,7 +152,7 @@ static void test_base_boundaries(void) {
 					}
 				}
 				// Global base validity and node-private capacity are separate.
-				int node_fits = 237 + 1 + (size_t) pid_length + strlen("%control") <= 255;
+				int node_fits = length + 2 + 1 + (size_t) pid_length + strlen("%control") <= ROSE_MAX_TOPIC_LEN;
 				rose_node *node = rose_create_node("n", -1, NULL, -1, NULL, NULL, 0, NULL, NULL);
 				assert((node != NULL) == node_fits);
 				if(node) {
@@ -171,22 +172,22 @@ static void test_base_boundaries(void) {
 	}
 	// Private channels include namespace, node name and the current PID.
 	// Derive the name length so these bounds remain exact for every PID width.
-	memset(base, 'b', 220);
-	base[220] = '\0';
+	memset(base, 'b', 210);
+	base[210] = '\0';
 	assert(setenv("ROSE_BASE", base, 1) == 0);
 	char name[256];
-	size_t name_length = 255 - (220 + 2 + strlen("ns/")) - (size_t) pid_length - strlen("%control");
+	size_t name_length = ROSE_MAX_TOPIC_LEN - (210 + 2 + strlen("ns/")) - (size_t) pid_length - strlen("%control");
 	assert(name_length > 0 && name_length + 1 < sizeof(name));
 	memset(name, 'n', name_length);
 	name[name_length] = '\0';
 	rose_node *node = rose_create_node(name, -1, "ns", -1, NULL, NULL, 0, NULL, NULL);
 	assert(node);
-	assert(strlen((char *) node->control_sub.sub->name) == 255);
-	assert(strlen((char *) node->param_sub.sub->name) == 254);
+	assert(strlen((char *) node->control_sub.sub->name) == ROSE_MAX_TOPIC_LEN);
+	assert(strlen((char *) node->param_sub.sub->name) == ROSE_MAX_TOPIC_LEN - 1);
 	rose_shutdown(node);
 	char *namespaced[] = {"test", "__ns:=ns"};
 	node = rose_init(2, namespaced, name, NULL, NULL);
-	assert(node && strlen((char *) node->control_sub.sub->name) == 255);
+	assert(node && strlen((char *) node->control_sub.sub->name) == ROSE_MAX_TOPIC_LEN);
 	rose_shutdown(node);
 	name[name_length] = 'n';
 	name[name_length + 1] = '\0';
@@ -194,9 +195,48 @@ static void test_base_boundaries(void) {
 	assert(!rose_init(2, namespaced, name, NULL, NULL));
 }
 
+static void test_topic_boundaries(void) {
+	assert(setenv("ROSE_BASE", "r", 1) == 0);
+	rose_node *node = rose_create_node("node", -1, "ns", -1, NULL, NULL, 0, NULL, NULL);
+	assert(node);
+	for(int absolute = 0; absolute < 2; ++absolute) {
+		char name[ROSE_MAX_TOPIC_LEN + 2], output[256], rule[512];
+		size_t length = ROSE_MAX_TOPIC_LEN - (absolute ? 3 : node->prefix_length);
+		memset(name, 't', sizeof(name));
+		if(absolute) {
+			name[0] = '/';
+			++length;
+		}
+		name[length] = '\0';
+		rose_publisher *pub = rose_create_pub(node, name, -1, 64, 16);
+		assert(pub && strlen((char *) pub->pub->name) == ROSE_MAX_TOPIC_LEN);
+		assert(rose_create_sub(node, name, -1, 0, NULL));
+		if(absolute) {
+			assert(rose_topic_to_shm(output, sizeof(output), name));
+		}
+		name[length] = 't';
+		name[length + 1] = '\0';
+		u64 pubs = node->pubs_length, subs = node->subs_length;
+		assert(!rose_create_pub(node, name, -1, 64, 16));
+		assert(!rose_create_sub(node, name, -1, 0, NULL));
+		assert(rose_last_error_code() == ROSE_ERR_BADINPUT);
+		assert(node->pubs_length == pubs && node->subs_length == subs);
+		if(absolute) {
+			assert(!rose_topic_to_shm(output, sizeof(output), name));
+		}
+		char *argv[] = {"test", "__ns:=ns", rule};
+		snprintf(rule, sizeof(rule), "%s:=ok", name);
+		assert(!rose_init(3, argv, "node", NULL, NULL));
+		snprintf(rule, sizeof(rule), "ok:=%s", name);
+		assert(!rose_init(3, argv, "node", NULL, NULL));
+	}
+	rose_shutdown(node);
+}
+
 int main(void) {
 	test_configuration();
 	test_base_boundaries();
+	test_topic_boundaries();
 	assert(setenv("ROSE_BASE", "/routing_test/", 1) == 0);
 	char *argv[130];
 	argv[0] = "test";

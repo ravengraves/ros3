@@ -305,10 +305,12 @@ With `ROSE_BASE=robot1` and `__ns:=front`, `camera` resolves to
 Name segments allow letters, digits, `_`, `-`, and `.`. Topics have no empty
 segments or trailing slash; namespaces accept an optional leading/trailing
 slash and `/` means root. `%`, commas and embedded NULs are invalid. Every
-complete transport name, including internal channel suffixes, is limited to 255
-bytes plus its terminating NUL. The longest core suffix currently limits the
-base token to 235 bytes; node namespaces/names must also leave room for PID and
-private channel suffixes.
+resolved topic name is limited to **245 bytes** (`ROSE_MAX_TOPIC_LEN`), including
+`ROSE_BASE`, namespace prefixes, separators and internal channel suffixes, but
+excluding its terminating NUL. Oversized names are rejected, never truncated.
+With the default base and no node namespace, the topic itself can use up to 239
+ASCII characters. The longest core suffix limits the base token to 225 bytes;
+node namespaces/names must also leave room for PID and private channel suffixes.
 
 `source:=destination` rules compare namespace-resolved sources, use the last
 matching rule, and apply once. Relative destinations use the node namespace;

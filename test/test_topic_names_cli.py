@@ -21,13 +21,13 @@ def rejected(tool, args, base):
 
 
 for tool, args in [("rosecore", []), ("rosenode", ["list"]), ("rosetopic", ["list"])]:
-    for base in ["", "/", "a%b", "a,b", "//bad", "a/b", "b" * 236, "/" + "b" * 237 + "/"]:
+    for base in ["", "/", "a%b", "a,b", "//bad", "a/b", "b" * 226, "/" + "b" * 227 + "/"]:
         rejected(tool, args, base)
 
 for command in ["echo", "hz", "rm", "info"]:
-    for topic in ["", "a%b", "a,b", "a//b", "a/", "/"]:
+    for topic in ["", "a%b", "a,b", "a//b", "a/", "/", "t" * (246 - len("/routing_cli%"))]:
         rejected("rosetopic", [command, topic], "routing_cli")
-    for base in ["b" * 236, "/" + "b" * 237 + "/"]:
+    for base in ["b" * 226, "/" + "b" * 227 + "/"]:
         rejected("rosetopic", [command, "valid_topic"], base)
 
-print("CLI canonical name and base-length rejection passed (56 subprocesses)")
+print("CLI canonical name and base-length rejection passed (60 subprocesses)")

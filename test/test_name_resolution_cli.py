@@ -68,7 +68,7 @@ try:
         core_log.seek(0)
         output = core_log.read()
         assert "AddressSanitizer" not in output and "runtime error:" not in output, output
-    print("name resolution transport/CLI passed: remaps, argc130, frozen base, namespace identity, PID lookup, 255-byte channels")
+    print("name resolution transport/CLI passed: remaps, argc130, frozen base, namespace identity, PID lookup, 245-byte channels")
 finally:
     for process in reversed(processes):
         if process.poll() is None:

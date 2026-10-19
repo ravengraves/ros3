@@ -179,7 +179,7 @@ static i64 rose_namespace_base(char *base, size_t capacity, size_t *length) {
 		}
 	}
 	if(!rose_validate_name_span(value, len, 0)
-	   || len > 255 - 2 - longest
+	   || len > ROSE_MAX_TOPIC_LEN - 2 - longest
 	   || capacity < 3 || len > capacity - 3) {
 		rose_record_error(ROSE_ERR_BADINPUT,
 				  "ROSE_BASE must be a non-empty namespace token that fits internal shared-memory names.");
@@ -209,8 +209,8 @@ static char *rose_topic_to_shm_span(char *shm, size_t capacity,
 		topic++;
 		length--;
 	}
-	if(length > 255 - base_length || base_length + length >= capacity) {
-		rose_record_error(ROSE_ERR_BADINPUT, "Resolved topic exceeds shared-memory name or output capacity.");
+	if(length > ROSE_MAX_TOPIC_LEN - base_length || base_length + length >= capacity) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Resolved topic exceeds the %d-byte name limit or output capacity.", ROSE_MAX_TOPIC_LEN);
 		return NULL;
 	}
 	memcpy(shm, base, base_length);
@@ -232,8 +232,8 @@ static const char *rose_connect_suggestion(i64 rc, int is_create) {
 	}
 	if(rc == -EINVAL) {
 		return is_create
-				? "Use a topic name under 256 bytes and pass positive `message_length` and `message_hz` values."
-				: "Verify the resolved topic name is under 256 bytes and points at the intended shared-memory object.";
+				? "Shorten the topic or namespace and pass positive `message_length` and `message_hz` values."
+				: "Verify the resolved topic name fits the ROS3 name limit and points at the intended shared-memory object.";
 	}
 	if(rc == -ENOMEM || rc == -EOVERFLOW) {
 		return "Lower `message_length` or `message_hz`, and check available shared-memory capacity such as `/dev/shm`.";
@@ -441,8 +441,8 @@ static i64 rose_qualify_topic(rose_node *n, const char *name, size_t length,
 		++name;
 		--length;
 	}
-	if(prefix_length + length > 255 || prefix_length + length >= capacity) {
-		rose_record_error(ROSE_ERR_BADINPUT, "Resolved topic exceeds the 255-byte shared-memory name limit.");
+	if(prefix_length + length > ROSE_MAX_TOPIC_LEN || prefix_length + length >= capacity) {
+		rose_record_error(ROSE_ERR_BADINPUT, "Resolved topic exceeds the %d-byte name limit or output capacity.", ROSE_MAX_TOPIC_LEN);
 		return ROSE_ERR_BADINPUT;
 	}
 	memcpy(topic, n->prefix, prefix_length);
@@ -503,8 +503,8 @@ static i64 rose_resolve_topic_name(rose_node *n,
 	}
 	if(!rose_validate_name_span(name, nlen, 1) || name[nlen - 1] == '/') {
 		rose_record_error(ROSE_ERR_BADINPUT,
-				  "%s received an invalid topic byte span. Use nonempty slash-separated ASCII letters, digits, '_', '-', or '.', without a trailing slash, within 255 bytes.",
-				  api);
+				  "%s received an invalid topic byte span. Use nonempty slash-separated ASCII letters, digits, '_', '-', or '.', without a trailing slash; resolved names must fit %d bytes.",
+				  api, ROSE_MAX_TOPIC_LEN);
 		return ROSE_ERR_BADINPUT;
 	}
 
@@ -711,7 +711,7 @@ static void rose_maintain_discovery(rose_node *n, u64 now) {
 	}
 	s->last_check = now;
 	char topic[256];
-	snprintf(topic, sizeof(topic), "%s_heartbeat", n->rosecore_pub.pub->name);
+	snprintf(topic, sizeof(topic), "%.*s_heartbeat", ROSE_MAX_TOPIC_LEN, n->rosecore_pub.pub->name);
 	if(!s->core_heartbeat) {
 		rose_quicksand_connect(n, &s->core_heartbeat, topic, -1, 0, 0);
 	}
@@ -1099,7 +1099,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 			prefix_len--;
 		}
 		if(prefix_len > 0) {
-			if((size_t) prefix_len > 255 - base_length - 1) {
+			if((size_t) prefix_len > ROSE_MAX_TOPIC_LEN - base_length - 1) {
 				rose_record_error(ROSE_ERR_BADINPUT, "Namespace prefix exceeds shared-memory name capacity.");
 				return NULL;
 			}
@@ -1145,7 +1145,7 @@ rose_node *rose_create_node(char *in_name, i64 name_len,
 	   || (size_t) name_len + (size_t) pid_length > 255
 	   || (size_t) prefix_len + (size_t) name_len + (size_t) pid_length
 					   + strlen("%control")
-			   > 255) {
+			   > ROSE_MAX_TOPIC_LEN) {
 		rose_record_error(ROSE_ERR_BADINPUT,
 				  "Node namespace and PID-suffixed name exceed internal shared-memory name capacity.");
 		return NULL;

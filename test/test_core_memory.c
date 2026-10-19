@@ -30,7 +30,7 @@ i64 memory_connect(quicksand_connection **out, char *name, i64 length,
 	if(length == -1) {
 		length = (i64) strlen(name);
 	}
-	assert(length > 0 && length <= 255);
+	assert(length > 0 && length <= ROSE_MAX_TOPIC_LEN);
 	*out = calloc(1, sizeof(**out));
 	assert(*out);
 	(*out)->buffer = calloc(1, sizeof(*(*out)->buffer));
@@ -161,9 +161,9 @@ static void test_bounds(void) {
 	char bounded[256];
 	memset(bounded, 'a', sizeof(bounded));
 	int pid_length = snprintf(output, sizeof(output), "-%lld", (long long) rose_platform_getpid());
-	i64 max_node = 255 - 6 - pid_length - (i64) strlen("%control");
+	i64 max_node = ROSE_MAX_TOPIC_LEN - 6 - pid_length - (i64) strlen("%control");
 	n = rose_create_node(bounded, max_node, NULL, -1, NULL, NULL, 0, alloc_a, free_a);
-	assert(n && strlen((char *) n->control_sub.sub->name) == 255);
+	assert(n && strlen((char *) n->control_sub.sub->name) == ROSE_MAX_TOPIC_LEN);
 	rose_shutdown(n);
 	assert(!rose_create_node(bounded, max_node + 1, NULL, -1, NULL, NULL, 0, alloc_a, free_a));
 	assert(!live[1] && !connection_count);
@@ -174,20 +174,20 @@ static void test_remap_capacity(void) {
 	char rules[18][254];
 	char *argv[19] = {"test"};
 	for(int i = 0; i < 18; ++i) {
-		memset(rules[i], 'a', 250);
-		memcpy(rules[i] + 250, ":=b", 4);
+		memset(rules[i], 'a', 240);
+		memcpy(rules[i] + 240, ":=b", 4);
 		argv[i + 1] = rules[i];
 	}
-	// 16 * 253 + 48 = 4096 exact storage bytes, including both NULs.
-	memset(rules[16], 'c', 45);
-	memcpy(rules[16] + 45, ":=b", 4);
+	// 16 * 243 + 208 = 4096 exact storage bytes, including both NULs.
+	memset(rules[16], 'c', 205);
+	memcpy(rules[16] + 205, ":=b", 4);
 	rose_node *n = rose_init(18, argv, "node", alloc_a, free_a);
 	assert(n && n->remap_count == 17);
-	assert(n->remap_strlens[32] == 45 && n->remap_strlens[33] == 1);
+	assert(n->remap_strlens[32] == 205 && n->remap_strlens[33] == 1);
 	rose_shutdown(n);
 	assert(!rose_init(19, argv, "node", alloc_a, free_a));
-	memset(rules[16], 'a', 250);
-	memcpy(rules[16] + 250, ":=b", 4);
+	memset(rules[16], 'a', 240);
+	memcpy(rules[16] + 240, ":=b", 4);
 	assert(!rose_init(18, argv, "node", alloc_a, free_a));
 	assert(!live[1] && !connection_count);
 	assert(setenv("ROSE_BASE", "rose", 1) == 0);
