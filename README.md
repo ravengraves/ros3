@@ -4,13 +4,12 @@
 pub/sub middleware for robotic systems.
 
 It is a ROS-like robotics runtime layer with lightning-fast system introspection
-tools and optional network and serial transports. ros3 uses[quicksand 🏜️]
-(https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and [mirage 🔮]
-(https://git.sr.ht/~alecgraves/mirage) for message encoding. Overall, ros3
-achieves 100x higher throughput, 30x lower latency, and 350x faster builds
-than [ROS2](http://ros2.org)!
+tools and optional network and serial transports. ros3 uses
+[quicksand 🏜️](https://git.sr.ht/~alecgraves/quicksand) for shared-memory IPC and 
+[mirage 🔮](https://git.sr.ht/~alecgraves/mirage) for message encoding.
+Overall, ros3 achieves 100x higher throughput, 30x lower latency, 
+and 350x faster builds than [ROS2](http://ros2.org)!
 
-**Build Status:**
 [![ROS3 CI](https://github.com/ravengraves/ros3/actions/workflows/ci.yml/badge.svg)](https://github.com/ravengraves/ros3/actions/workflows/ci.yml)
 
 
